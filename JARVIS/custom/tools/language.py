@@ -10,6 +10,7 @@ AGENTS.md: Language Intelligence module for Tamil/English/Hindi/Tanglish support
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any, Dict, Protocol
 
 from custom.config import load_settings
@@ -256,6 +257,203 @@ def get_language_settings() -> dict:
     }
 
 
+# ── Dedicated Translation Model (NLLB / M2M100 / custom) ────────────────────
+
+class TranslationModel:
+    """Wrapper for dedicated offline translation models.
+
+    Supports models that follow the Hugging Face Transformers interface:
+    - NLLB-200 (facebook/nllb-200-distilled-600M, etc.)
+    - M2M100 (facebook/m2m100_418M, etc.)
+    - Any MarianMT / Opus-MT model
+    - Custom fine-tuned models
+
+    The model is loaded lazily on first use. Requires:
+        uv pip install transformers torch sentencepiece accelerate
+
+    Configure via settings.yaml:
+        language_intelligence:
+            translation_model: "facebook/nllb-200-distilled-600M"
+            translation_device: "cpu"  # or "cuda", "auto"
+            translation_compute_type: "int8"  # or "fp16", "fp32"
+    """
+
+    _instance: Optional["TranslationModel"] = None
+    _lock = threading.Lock()
+
+    def __new__(cls) -> "TranslationModel":
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self) -> None:
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+
+        self._model = None
+        self._tokenizer = None
+        self._model_name: Optional[str] = None
+        self._device: str = "cpu"
+        self._compute_type: str = "int8"
+        self._load_error: Optional[str] = None
+        self._lang_codes: Dict[str, str] = {}
+        self._load_config()
+
+    def _load_config(self) -> None:
+        """Load translation model config from settings.yaml."""
+        try:
+            settings = load_settings()
+            li = (settings.get("features") or {}).get("language_intelligence")
+            if isinstance(li, dict):
+                self._model_name = str(li.get("translation_model", "") or "").strip() or None
+                self._device = str(li.get("translation_device", "cpu") or "cpu").strip().lower()
+                self._compute_type = str(li.get("translation_compute_type", "int8") or "int8").strip().lower()
+        except Exception:
+            pass
+
+    def is_configured(self) -> bool:
+        """Return True if a model name is configured."""
+        return bool(self._model_name)
+
+    def is_available(self) -> bool:
+        """Return True if the model is loaded and ready."""
+        return self._model is not None and self._tokenizer is not None
+
+    def load_error(self) -> Optional[str]:
+        """Return the last load error, if any."""
+        return self._load_error
+
+    def _ensure_loaded(self) -> bool:
+        """Load the model and tokenizer if not already loaded."""
+        if self.is_available():
+            return True
+        if not self.is_configured():
+            self._load_error = "No translation_model configured in settings.yaml (features.language_intelligence.translation_model)"
+            return False
+        try:
+            import torch
+            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        except Exception as exc:
+            self._load_error = f"Missing dependencies: {exc}. Run: uv pip install transformers torch sentencepiece accelerate"
+            return False
+
+        try:
+            self._tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(
+                self._model_name,
+                torch_dtype=torch.float16 if self._compute_type == "fp16" else torch.float32,
+                low_cpu_mem_usage=True,
+            )
+            if self._device != "cpu" and torch.cuda.is_available():
+                self._model = self._model.to(self._device)
+            self._model.eval()
+
+            # Build language code mapping for common models
+            self._build_lang_codes()
+
+            self._load_error = None
+            return True
+        except Exception as exc:
+            self._load_error = f"Failed to load translation model: {exc}"
+            self._model = None
+            self._tokenizer = None
+            return False
+
+    def _build_lang_codes(self) -> None:
+        """Build language code mapping from tokenizer."""
+        if not self._tokenizer:
+            return
+        # Try to get language codes from tokenizer (NLLB/M2M100 style)
+        try:
+            if hasattr(self._tokenizer, "lang_code_to_id"):
+                self._lang_codes = dict(self._tokenizer.lang_code_to_id)
+            elif hasattr(self._tokenizer, "sp_model") and hasattr(self._tokenizer.sp_model, "id_to_piece"):
+                # SentencePiece-based - try common prefixes
+                pass
+        except Exception:
+            pass
+        # Fallback mappings
+        if not self._lang_codes:
+            self._lang_codes = {
+                "ta": "ta_IN",  # NLLB Tamil
+                "tam": "ta_IN",
+                "tamil": "ta_IN",
+                "en": "en_XX",  # NLLB English
+                "eng": "en_XX",
+                "english": "en_XX",
+                "hi": "hi_IN",
+                "hin": "hi_IN",
+                "hindi": "hi_IN",
+            }
+
+    def _map_lang(self, lang: str) -> str:
+        """Map internal language name to model-specific language code."""
+        key = str(lang).strip().lower()
+        return self._lang_codes.get(key, key)
+
+    def translate(self, text: str, source_lang: str, target_lang: str) -> str:
+        """Translate text using the dedicated model.
+
+        Returns the translated text, or a string starting with
+        "[translation unavailable]" on failure.
+        """
+        if not text or not text.strip():
+            return ""
+        if not self._ensure_loaded():
+            return f"{UNAVAILABLE_PREFIX} {self._load_error or 'model not loaded'}"
+
+        try:
+            import torch
+        except Exception as exc:
+            return f"{UNAVAILABLE_PREFIX} torch not available: {exc}"
+
+        src_code = self._map_lang(source_lang)
+        tgt_code = self._map_lang(target_lang)
+
+        try:
+            # Set source language if tokenizer supports it (NLLB style)
+            if hasattr(self._tokenizer, "src_lang"):
+                self._tokenizer.src_lang = src_code
+
+            inputs = self._tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            if self._device != "cpu" and hasattr(self._model, "device"):
+                inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
+
+            # For NLLB: forced_bos_token_id = target language token
+            forced_bos = None
+            if hasattr(self._tokenizer, "lang_code_to_id") and tgt_code in self._tokenizer.lang_code_to_id:
+                forced_bos = self._tokenizer.lang_code_to_id[tgt_code]
+            elif hasattr(self._tokenizer, "convert_tokens_to_ids"):
+                forced_bos = self._tokenizer.convert_tokens_to_ids(tgt_code)
+
+            with torch.no_grad():
+                generated = self._model.generate(
+                    **inputs,
+                    forced_bos_token_id=forced_bos,
+                    max_length=512,
+                    num_beams=4,
+                    early_stopping=True,
+                )
+
+            translated = self._tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+            return translated.strip()
+        except Exception as exc:
+            return f"{UNAVAILABLE_PREFIX} translation error: {exc}"
+
+
+def get_translation_model() -> TranslationModel:
+    """Get the singleton TranslationModel instance."""
+    return TranslationModel()
+
+
+# Import threading at top if not already there
+import threading
+
+
 # ── Convenience translation wrappers ──────────────────────────────────────
 
 
@@ -476,6 +674,11 @@ def translate(
 
     Empty input returns ``""``. When source and target are the same language,
     the text is returned unchanged and the engine is never called.
+
+    Priority:
+        1. Dedicated translation model (NLLB/M2M100) if configured in settings.yaml
+        2. Local LLM engine (Qwen via bridge)
+        3. Tanglish dictionary converters (for ta↔en tanglish)
     """
     target = _normalize_lang(target_lang)
     if not text or not text.strip():
@@ -500,6 +703,33 @@ def translate(
         _translation_cache[key] = _translation_cache.pop(key)
         return cached
 
+    # 1. Try dedicated translation model first (NLLB, M2M100, etc.)
+    dedicated_model = get_translation_model()
+    if dedicated_model.is_configured():
+        result = dedicated_model.translate(text, source, target)
+        if not result.startswith(UNAVAILABLE_PREFIX):
+            # Store in LRU cache
+            _translation_cache[key] = result
+            if len(_translation_cache) > _MAX_CACHE_SIZE:
+                oldest = next(iter(_translation_cache))
+                del _translation_cache[oldest]
+            return result
+        # If dedicated model failed, fall through to LLM
+
+    # 2. Try Tanglish dictionary converters (for ta↔en tanglish)
+    if (source == TANGLISH and target == ENGLISH) or (source == ENGLISH and target == TANGLISH):
+        if source == TANGLISH and target == ENGLISH:
+            result = tanglish_to_english(text)
+        else:
+            result = english_to_tanglish(text)
+        if result != text:  # Only use if mapping actually changed something
+            _translation_cache[key] = result
+            if len(_translation_cache) > _MAX_CACHE_SIZE:
+                oldest = next(iter(_translation_cache))
+                del _translation_cache[oldest]
+            return result
+
+    # 3. Fall back to LLM-based translation
     messages = [{"role": "user", "content": _build_prompt(text, source, target)}]
 
     try:
@@ -866,84 +1096,493 @@ def tanglish_to_english(tanglish: str) -> str:
     conversion (not a full translation).
     """
     mapping = {
+        # Greetings & basics
         "vanakkam": "hello",
-        "enna": "what",
-        "epdi": "how",
-        "eppadi": "how",
-        "irukku": "is",
-        "irukkingu": "are",
-        "nalla": "good",
-        "romba": "very",
-        "seri": "okay",
+        "vanakam": "hello",
+        "namaskaram": "greetings",
         "sari": "yes",
         "illa": "no",
         "ille": "no",
+        "seri": "okay",
+        "sollunga": "please say",
+        "sollu": "say",
+        "sonna": "said / told",
+
+        # Questions
+        "enna": "what",
+        "epdi": "how",
+        "eppadi": "how",
+        "engay": "where",
+        "eppov": "when",
+        "eppovil": "when",
+        "yaaru": "who",
+        "yaar": "who",
+        "en": "why",
+        "yena": "why",
+        "evlo": "how much",
+        "evvalavu": "how much",
+        "evlo perum": "how big",
+        "evlo sinna": "how small",
+
+        # Verbs - common
+        "irukku": "is",
+        "irukkingu": "are",
+        "irundhu": "was",
+        "irundhichu": "had been",
+        "varan": "comes",
+        "varraan": "will come",
+        "vandhu": "came",
+        "vandhachu": "has come",
+        "poganum": "must go",
+        "pogalam": "let's go",
+        "poitu": "went",
+        "poiyirundhu": "had gone",
+        "saapidu": "eat",
+        "saapiduven": "I will eat",
+        "saapitten": "ate",
+        "kudichu": "drank",
+        "kudikka": "to drink",
+        "nillu": "stand",
+        "nillunga": "please stand",
+        "ukkaru": "sit",
+        "ukkarunga": "please sit",
+        "urangu": "sleep",
+        "urangurathu": "sleeping",
+        "ezhu": "wake up",
+        "ezhunthu": "woke up",
+        "nadakkum": "walk",
+        "nadandhu": "walked",
+        "oodu": "run",
+        "odinen": "ran",
+        "paaru": "look / see",
+        "paathu": "looked",
+        "paathukonga": "take care",
+        "kettu": "listen / ask",
+        "ketten": "asked",
+        "kettunga": "please listen",
+        "pesu": "speak",
+        "pesurathu": "speaking",
+        "pesunga": "please speak",
+        "sollu": "tell",
+        "solluran": "telling",
+        "solli": "told",
+        "eludhu": "write",
+        "eludhinen": "wrote",
+        "padippu": "read / study",
+        "padichen": "read / studied",
+        "kelvi": "question",
+        "kelvi kekku": "ask question",
+        "vidai": "answer",
+        "vidai sollu": "give answer",
+        "thiruppi": "return",
+        "thirumbi": "turn back",
+        "vaangalam": "buy",
+        "vaanginen": "bought",
+        "selvam": "sell",
+        "selvathu": "selling",
+
+        # Adjectives / Descriptors
+        "nalla": "good",
+        "ketta": "bad",
+        "periya": "big",
+        "siricha": "small",
+        "periya periya": "very big",
+        "sinna sinna": "very small",
+        "romba": "very / a lot",
+        "miga": "very",
+        "adigam": "very much",
+        "konjam": "little / a bit",
+        "silla": "little",
+        "nallaa": "well",
+        "kettama": "badly",
+        "vegarama": "fast",
+        "mellama": "slowly",
+        "azhaga": "beautiful",
+        "azhagan": "handsome (male)",
+        "azhagi": "beautiful (female)",
+        "puthiya": "new",
+        "palaiya": "old",
+        "nalla per": "good name",
+        "pudhu puthu": "brand new",
+        "arisi": "raw rice",
+        "satham": "cooked rice",
+
+        # Family & Relations
         "thambi": "younger brother",
         "thangachi": "younger sister",
         "akka": "elder sister",
         "anna": "elder brother",
+        "amma": "mother",
+        "appa": "father",
+        "thatha": "grandfather",
+        "paatti": "grandmother",
+        "chithi": "aunt (mother's sister)",
+        "mami": "aunt (uncle's wife)",
+        "maman": "uncle (mother's brother)",
+        "chithappa": "uncle (father's brother)",
+        "periyappa": "elder uncle",
+        "chinappa": "younger uncle",
         "machan": "maternal uncle / friend",
         "machi": "paternal uncle / friend",
-        "poda": "go",
-        "podi": "come",
-        "sollu": "say",
-        "sollunga": "please say",
-        "sonna": "said / told",
-        "vandhu": "came",
-        "poitu": "went",
-        "poga": "go",
-        "inge": "here",
-        "ange": "there",
-        "yaaru": "who",
-        "yaar": "who",
-        "enge": "how",
-        "enga": "what",
-        "aama": "our",
-        "aamaa": "ours",
-        "appo": "then",
-        "ippo": "now",
-        "ipdi": "how",
-        "adhu": "that",
-        "idhu": "this",
-        "avaru": "they",
-        "ival": "this",
-        "enakku": "to me",
-        "unakku": "to you",
-        "unga": "to us",
-        "unnu": "yes / it is",
-        "nadakai": "walk",
-        "saapadu": "food",
-        "thanni": "water",
-        "veedu": "house",
-        "kudichi": "drink",
-        "saapidu": "eat",
-        "nillu": "stand",
-        "urangu": "sleep",
-        "ezhu": "wake up",
-        "panni": "work",
-        "viidu": "home",
-        "ketta": "bad",
-        "periya": "big",
-        "siricha": "small",
-        "pesu": "speak",
-        "kettu": "listen",
-        "paaru": "look",
-        "vano": "come",
-        "povo": "go",
-        "ennai": "me",
-        "ungal": "your / you",
-        "andha": "that",
-        "indha": "this",
-        "engay": "where",
-        "eppov": "when",
-        "enaka": "for me",
+        "machanukku": "for brother-in-law / friend",
+        "koil pillai": "cousin",
+        "sahodaran": "brother",
+        "sahodari": "sister",
+        "magane": "son",
+        "magal": "daughter",
+        "pillai": "child",
+        "kulanthai": "baby",
+
+        # People
         "naan": "I",
-        "nee": "you",
+        "naama": "we (incl.)",
+        "naanga": "we (excl.)",
+        "nee": "you (sg.)",
+        "neenga": "you (pl.)",
         "avan": "he",
         "ava": "she",
+        "avaru": "they / he/she (respect)",
+        "avanga": "they (pl.)",
+        "ivan": "this man",
+        "ival": "this woman",
+        "uvan": "that man",
+        "uval": "that woman",
+        "yaaru": "who",
+        "aar": "who (pl.)",
+
+        # Pronouns & Possessives
+        "enakku": "to me / for me",
+        "unakku": "to you / for you",
+        "avarkku": "to him/her / for him/her",
+        "en": "my",
+        "un": "your",
+        "avanudaiya": "his",
+        "avaludaiya": "her",
+        "avarrudaiya": "their",
+        "namakku": "to us / for us",
+        "nungalukku": "to you all / for you all",
+        "enoda": "mine",
+        "unoda": "yours",
+        "avaruoda": "theirs",
+        "namoda": "ours",
+        "nungaloda": "yours (pl.)",
+
+        # Time
+        "ippo": "now",
+        "ippozhuthu": "now",
+        "naalai": "tomorrow",
+        "naalai kaalai": "tomorrow morning",
+        "naalai maalai": "tomorrow evening",
+        "netru": "yesterday",
+        "netru kaalai": "yesterday morning",
+        "netru maalai": "yesterday evening",
+        "inru": "today",
+        "inru kaalai": "this morning",
+        "inru maalai": "this evening",
+        "kaalai": "morning",
+        "maalai": "evening",
+        "iravu": "night",
+        "nalla iru": "good night",
+        "nalla kaalai": "good morning",
+        "nalla maalai": "good evening",
+        "appo": "then",
+        "ippadi": "like this",
+        "appadi": "like that",
+        "nerama": "on time",
+        "neram illa": "no time",
+        "mudichiruchu": "finished",
+        "mudiyala": "cannot finish",
+        "mudiyum": "can finish",
+
+        # Places
+        "inge": "here",
+        "anga": "there",
+        "ange": "there",
+        "engay": "where",
+        "veedu": "house / home",
+        "viidu": "home",
+        "ooru": "town / village",
+        "kadai": "shop",
+        "kadaikku": "to shop",
+        "pallikoodam": "school",
+        "office": "office",
+        "aspithiri": "hospital",
+        "kovil": "temple",
+        "palli": "mosque / church",
+        "thottam": "garden",
+        "kaadu": "forest",
+        "kadal": "sea",
+        "aar": "river",
+        "kulam": "pond",
+        "medu": "hill",
+        "malai": "mountain",
+        "theru": "street",
+        "salai": "road",
+        "bus stand": "bus stand",
+        "railway station": "railway station",
+        "airport": "airport",
+
+        # Food & Drink
+        "saapadu": "food / meal",
+        "saapadu podu": "serve food",
+        "saapadu kazhichu": "finished eating",
+        "kaapi": "coffee",
+        "thanni": "water",
+        "paal": "milk",
+        "chaaya": "tea",
+        "juice": "juice",
+        "soru": "cooked rice",
+        "arisi": "raw rice",
+        "sambar": "sambar",
+        "rasam": "rasam",
+        "thayir": "curd / yogurt",
+        "mor": "buttermilk",
+        "uppuma": "upma",
+        "idli": "idli",
+        "dosai": "dosa",
+        "vadai": "vada",
+        "pongal": "pongal",
+        "chutney": "chutney",
+        "milagai": "chilli",
+        "uppu": "salt",
+        "sarkkarai": "sugar",
+        "vennai": "butter",
+        "ennei": "oil / ghee",
+        "thennai": "coconut",
+        "maangai": "mango",
+        "pazham": "fruit / banana",
+        "vazhaipazham": "banana",
+        "apple": "apple",
+        "orange": "orange",
+
+        # Objects
+        "pena": "pen",
+        "puthagam": "book",
+        "note": "notebook",
+        "pencil": "pencil",
+        "eraser": "eraser",
+        "scale": "ruler",
+        "bag": "bag",
+        "bottle": "bottle",
+        "tumbler": "tumbler",
+        "plate": "plate",
+        "kuvalai": "bowl",
+        "karandi": "ladle",
+        "thattu": "tray",
+        "moolai": "corner",
+        "mesai": "table",
+        "naarkali": "chair",
+        "kattil": "bed",
+        "madai": "mattress",
+        "thuduppu": "pillow",
+        "koodal": "blanket",
+        "sattai": "shirt",
+        "pavaadai": "skirt / pavadai",
+        "panthu": "pants",
+        "sela": "saree",
+        "kacchai": "underwear",
+        "kuttichi": "shoes",
+        "sandal": "sandals",
+        "mookuthi": "nose ring",
+        "kadukkan": "earring",
+        "valayal": "bangle",
+        "mothiram": "ring",
+        "thali": "mangalsutra",
+        "kaappu": "bangle (worn)",
+
+        # Body parts
+        "thalai": "head",
+        "mooku": "nose",
+        "kannu": "eye",
+        "chevi": "ear",
+        "vaay": "mouth",
+        "pal": "tooth",
+        "naakku": "tongue",
+        "mookuthi": "nostril",
+        "mudi": "hair",
+        "kai": "hand",
+        "kaal": "leg / foot",
+        "viramam": "finger",
+        "kaalviramam": "toe",
+        "manusu": "stomach / heart",
+        "udal": "body",
+        "udal nalam": "health",
+        "kuttam": "fault / disease",
+
+        # Actions - daily
+        "vandhu vanthu": "came and came (repeatedly)",
+        "sendra": "went",
+        "sendraan": "he went",
+        "sendraal": "she went",
+        "vandhaan": "he came",
+        "vandhaal": "she came",
+        "irukku": "is there / exists",
+        "illa": "not there / doesn't exist",
+        "irundhu": "was there",
+        "illaie": "wasn't there",
+        "vaangunu": "will buy",
+        "selvunu": "will sell",
+        "pogunnen": "I will go",
+        "varunnen": "I will come",
+        "saapidren": "I will eat",
+        "kudippen": "I will drink",
+        "urangaren": "I will sleep",
+        "ezhunthen": "I woke up",
+        "padippen": "I will read",
+        "eluthuven": "I will write",
+        "pesuven": "I will speak",
+        "kelpen": "I will ask",
+        "ketpen": "I will listen",
+        "paakren": "I will see",
+        "nadappen": "I will walk",
+        "ooduven": "I will run",
+        "ukkaren": "I will sit",
+        "nilluven": "I will stand",
+        "thirumbi varuven": "I will return",
+
+        # Common phrases
         "romba nalla": "very good",
+        "romba kettila": "very bad",
+        "romba periya": "very big",
+        "romba sinna": "very small",
+        "romba azhagu": "very beautiful",
+        "konjam nalla": "a little good",
+        "konjam kettila": "a little bad",
         "sari irukku": "it is okay",
+        "sari illa": "not okay",
+        "enakku theriyum": "I know",
         "enakku theriyala": "I don't know",
+        "enakku puriyum": "I understand",
+        "enakku puriyala": "I don't understand",
+        "unakkum theriyuma": "do you know?",
+        "unakkum puriyuma": "do you understand?",
+        "epdi irukku": "how is it?",
+        "enna panra": "what are you doing?",
+        "enna panrom": "what shall we do?",
+        "engay porom": "where are we going?",
+        "eppov varrom": "when will you come?",
+        "eppov pogalam": "when shall we go?",
+        "ippo varu": "come now",
+        "ippo poga": "go now",
+        "nerama vaa": "come on time",
+        "thanni kudu": "give water",
+        "saapadu kudu": "give food",
+        "kaapi kudu": "give coffee",
+        "thanni kudunga": "please give water",
+        "saapadu kudunga": "please give food",
+        "idhu enna": "what is this?",
+        "adhu enna": "what is that?",
+        "idhu enakku": "this is for me",
+        "adhu unakku": "that is for you",
+        "idhu nalla": "this is good",
+        "adhu kettila": "that is bad",
+        "idhu romba nalla": "this is very good",
+        "adhu romba kettila": "that is very bad",
+        "nandri": "thank you",
+        "romba nandri": "thank you very much",
+        "parava illa": "no problem / you're welcome",
+        "mannikku": "excuse me / sorry",
+        "mannichu": "forgive me",
+        "enakku manasu irukku": "I like it",
+        "enakku manasu illa": "I don't like it",
+        "unakku manasu irukka": "do you like it?",
+        "naan unnai nesikiren": "I love you",
+        "naan unnai kadhalikiren": "I love you (romantic)",
+        "unnai vitaamaatten": "I won't leave you",
+        "nalladhu": "good thing",
+        "kettadhu": "bad thing",
+        "valama": "come (respectful)",
+        "po": "go (casual)",
+        "poo": "go (casual)",
+        "vaa": "come (casual)",
+        "vaanga": "come (respectful)",
+        "irunga": "sit / stay (respectful)",
+        "nillunga": "stand / wait (respectful)",
+        "paathukonga": "take care",
+        "kaapathunga": "protect",
+        "kaaval": "police / guard",
+        "doctor": "doctor",
+        "maruthuvar": "doctor (Tamil)",
+        "marunthu": "medicine",
+        "marunthu kudu": "give medicine",
+        "marunthu saapidu": "take medicine",
+        "valiya irukku": "pain is there",
+        "thalai vali": "headache",
+        "vayiru vali": "stomach ache",
+        "kai vali": "hand pain",
+        "kaal vali": "leg pain",
+        "kuttam": "fault / defect",
+        "tappu": "mistake",
+        "tappu panniten": "I made a mistake",
+        "tappu pannungala": "did you make a mistake?",
+        "seri pannu": "correct it / fix it",
+        "seri panninen": "I fixed it",
+        "mudichu": "finished / done",
+        "mudiyala": "cannot do",
+        "mudiyum": "can do",
+        "veyil": "sun / heat",
+        "mazhai": "rain",
+        "kaatru": "wind",
+        "pani": "fog / dew",
+        "minnal": "lightning",
+        "idimuzhakkam": "thunder",
+        "nilavu": "moonlight",
+        "suryan": "sun",
+        "ningal": "you (respectful)",
+        "neenga": "you (plural/respectful)",
+        "naanga": "we",
+        "naama": "we (including you)",
+        "avanga": "they",
+        "avargal": "they (respectful)",
+        "eppadi": "how",
+        "enna": "what",
+        "enga": "where",
+        "eppov": "when",
+        "yaaru": "who",
+        "yen": "why",
+        "evlo": "how much",
+        "evvalavu": "how much",
+        "enna per": "what name",
+        "en per": "my name",
+        "un per": "your name",
+        "avan per": "his name",
+        "aval per": "her name",
+        "ennoda per": "my name",
+        "unnoda per": "your name",
+        "indha": "this",
+        "andha": "that",
+        "indha oor": "this town",
+        "andha oor": "that town",
+        "indha veedu": "this house",
+        "andha veedu": "that house",
+        "indha kadai": "this shop",
+        "andha kadai": "that shop",
+        "indha saapadu": "this food",
+        "andha saapadu": "that food",
+        "indha pusthagam": "this book",
+        "andha pusthagam": "that book",
+        "indha pen": "this pen",
+        "andha pen": "that pen",
+        "indha kai": "this hand",
+        "andha kai": "that hand",
+        "indha kaal": "this leg",
+        "andha kaal": "that leg",
+        "indha thalai": "this head",
+        "andha thalai": "that head",
+        "indha kannu": "this eye",
+        "andha kannu": "that eye",
+        "indha chevi": "this ear",
+        "andha chevi": "that ear",
+        "indha vaay": "this mouth",
+        "andha vaay": "that mouth",
+        "indha pal": "this tooth",
+        "andha pal": "that tooth",
+        "indha naakku": "this tongue",
+        "andha naakku": "that tongue",
+        "indha mudi": "this hair",
+        "andha mudi": "that hair",
+        "indha udan": "this body",
+        "andha udal": "that body",
     }
 
     return _apply_word_map(tanglish, mapping)
@@ -957,65 +1596,493 @@ def english_to_tanglish(english: str) -> str:
     conversion (not a full translation).
     """
     mapping = {
+        # Greetings & basics
         "hello": "vanakkam",
-        "what": "enna",
-        "how": "epdi",
-        "is": "irukku",
-        "are": "irukkingu",
-        "good": "nalla",
-        "very": "romba",
-        "okay": "seri",
+        "hi": "vanakkam",
+        "greetings": "namaskaram",
         "yes": "sari",
         "no": "illa",
+        "okay": "seri",
+        "ok": "seri",
+        "please say": "sollunga",
+        "say": "sollu",
+        "tell": "sonna",
+        "said": "sonna",
+        "told": "sonna",
+
+        # Questions
+        "what": "enna",
+        "how": "epdi",
+        "where": "engay",
+        "when": "eppov",
+        "who": "yaaru",
+        "why": "yen",
+        "how much": "evlo",
+        "how many": "evlo",
+        "how big": "evlo perum",
+        "how small": "evlo sinna",
+
+        # Verbs
+        "is": "irukku",
+        "are": "irukkingu",
+        "was": "irundhu",
+        "were": "irundhu",
+        "come": "vaa",
+        "comes": "varan",
+        "came": "vandhu",
+        "will come": "varraan",
+        "go": "po",
+        "goes": "poganum",
+        "went": "poitu",
+        "will go": "pogalam",
+        "must go": "poganum",
+        "eat": "saapidu",
+        "eats": "saapidu",
+        "ate": "saapitten",
+        "will eat": "saapiduven",
+        "drink": "kudikka",
+        "drinks": "kudikka",
+        "drank": "kudichu",
+        "will drink": "kudippen",
+        "stand": "nillu",
+        "stands": "nillu",
+        "stood": "nillu",
+        "sit": "ukkaru",
+        "sits": "ukkaru",
+        "sat": "ukkaru",
+        "sleep": "urangu",
+        "sleeps": "urangu",
+        "slept": "urangurathu",
+        "wake up": "ezhu",
+        "wakes up": "ezhu",
+        "woke up": "ezhunthu",
+        "walk": "nadakkum",
+        "walks": "nadakkum",
+        "walked": "nadandhu",
+        "run": "oodu",
+        "runs": "oodu",
+        "ran": "odinen",
+        "look": "paaru",
+        "looks": "paaru",
+        "looked": "paathu",
+        "see": "paaru",
+        "saw": "paathu",
+        "listen": "kettu",
+        "listens": "kettu",
+        "listened": "ketten",
+        "ask": "kettu",
+        "asks": "kettu",
+        "asked": "ketten",
+        "speak": "pesu",
+        "speaks": "pesu",
+        "spoke": "pesurathu",
+        "tell": "sollu",
+        "tells": "sollu",
+        "told": "solli",
+        "write": "eludhu",
+        "writes": "eludhu",
+        "wrote": "eludhinen",
+        "read": "padippu",
+        "reads": "padippu",
+        "studied": "padichen",
+        "study": "padippu",
+        "question": "kelvi",
+        "answer": "vidai",
+        "return": "thiruppi",
+        "returns": "thiruppi",
+        "turn back": "thirumbi",
+        "buy": "vaangalam",
+        "buys": "vaangalam",
+        "bought": "vaanginen",
+        "sell": "selvam",
+        "sells": "selvam",
+        "sold": "selvathu",
+
+        # Adjectives
+        "good": "nalla",
+        "bad": "ketta",
+        "big": "periya",
+        "small": "sinna",
+        "very big": "romba periya",
+        "very small": "romba sinna",
+        "very": "romba",
+        "a lot": "romba",
+        "much": "adigam",
+        "little": "konjam",
+        "a bit": "konjam",
+        "well": "nallaa",
+        "badly": "kettama",
+        "fast": "vegarama",
+        "slow": "mellama",
+        "slowly": "mellama",
+        "beautiful": "azhaga",
+        "handsome": "azhagan",
+        "new": "puthiya",
+        "old": "palaiya",
+        "brand new": "pudhu puthu",
+
+        # Family
         "younger brother": "thambi",
         "younger sister": "thangachi",
         "elder sister": "akka",
         "elder brother": "anna",
-        "maternal uncle": "machan",
-        "paternal uncle": "machi",
-        "go": "poga",
-        "come": "vandhu",
-        "say": "sollu",
-        "please say": "sollunga",
-        "tell": "sonna",
-        "came": "vandhu",
-        "went": "poitu",
-        "here": "inge",
-        "there": "ange",
-        "who": "yaaru",
-        "our": "aama",
-        "ours": "aamaa",
-        "then": "appo",
-        "now": "ippo",
-        "that": "adhu",
-        "this": "idhu",
-        "they": "avaru",
-        "to me": "enakku",
-        "to you": "unakku",
-        "to us": "unga",
-        "food": "saapadu",
-        "water": "thanni",
-        "house": "veedu",
-        "home": "viidu",
-        "drink": "kudichi",
-        "eat": "saapidu",
-        "stand": "nillu",
-        "sleep": "urangu",
-        "wake up": "ezhu",
-        "work": "panni",
-        "big": "periya",
-        "small": "siricha",
-        "bad": "ketta",
-        "speak": "pesu",
-        "listen": "kettu",
-        "look": "paaru",
+        "mother": "amma",
+        "father": "appa",
+        "grandfather": "thatha",
+        "grandmother": "paatti",
+        "aunt": "chithi",
+        "uncle": "maman",
+        "cousin": "koil pillai",
+        "brother": "sahodaran",
+        "sister": "sahodari",
+        "son": "magane",
+        "daughter": "magal",
+        "child": "pillai",
+        "baby": "kulanthai",
+
+        # Pronouns
         "I": "naan",
+        "we": "naanga",
+        "we (including you)": "naama",
         "you": "nee",
+        "you (plural)": "neenga",
         "he": "avan",
         "she": "ava",
-        "I don't know": "enakku theriyala",
+        "they": "avanga",
+        "they (respectful)": "avargal",
+        "this man": "ivan",
+        "this woman": "ival",
+        "that man": "uvan",
+        "that woman": "uval",
+        "who": "yaaru",
+
+        # Possessives
+        "my": "en",
+        "your": "un",
+        "his": "avanudaiya",
+        "her": "avaludaiya",
+        "their": "avarrudaiya",
+        "our": "nam",
+        "yours (plural)": "nungal",
+        "mine": "enoda",
+        "yours": "unoda",
+        "theirs": "avaruoda",
+        "ours": "namoda",
+        "yours (pl.)": "nungaloda",
+
+        # Time
+        "now": "ippo",
+        "right now": "ippozhuthu",
+        "tomorrow": "naalai",
+        "tomorrow morning": "naalai kaalai",
+        "tomorrow evening": "naalai maalai",
+        "yesterday": "netru",
+        "yesterday morning": "netru kaalai",
+        "yesterday evening": "netru maalai",
+        "today": "inru",
+        "this morning": "inru kaalai",
+        "this evening": "inru maalai",
+        "morning": "kaalai",
+        "evening": "maalai",
+        "night": "iravu",
+        "good night": "nalla iru",
+        "good morning": "nalla kaalai",
+        "good evening": "nalla maalai",
+        "then": "appo",
+        "like this": "ippadi",
+        "like that": "appadi",
+        "on time": "nerama",
+        "no time": "neram illa",
+        "finished": "mudichiruchu",
+        "cannot finish": "mudiyala",
+        "can finish": "mudiyum",
+
+        # Places
+        "here": "inge",
+        "there": "ange",
+        "where": "engay",
+        "house": "veedu",
+        "home": "viidu",
+        "town": "ooru",
+        "village": "ooru",
+        "shop": "kadai",
+        "to shop": "kadaikku",
+        "school": "pallikoodam",
+        "office": "office",
+        "hospital": "aspithiri",
+        "temple": "kovil",
+        "mosque": "palli",
+        "church": "palli",
+        "garden": "thottam",
+        "forest": "kaadu",
+        "sea": "kadal",
+        "river": "aar",
+        "pond": "kulam",
+        "hill": "medu",
+        "mountain": "malai",
+        "street": "theru",
+        "road": "salai",
+        "bus stand": "bus stand",
+        "railway station": "railway station",
+        "airport": "airport",
+
+        # Food
+        "food": "saapadu",
+        "meal": "saapadu",
+        "coffee": "kaapi",
+        "water": "thanni",
+        "milk": "paal",
+        "tea": "chaaya",
+        "juice": "juice",
+        "rice": "soru",
+        "raw rice": "arisi",
+        "sambar": "sambar",
+        "rasam": "rasam",
+        "curd": "thayir",
+        "yogurt": "thayir",
+        "buttermilk": "mor",
+        "upma": "uppuma",
+        "idli": "idli",
+        "dosa": "dosai",
+        "vada": "vadai",
+        "pongal": "pongal",
+        "chutney": "chutney",
+        "chilli": "milagai",
+        "salt": "uppu",
+        "sugar": "sarkkarai",
+        "butter": "vennai",
+        "oil": "ennei",
+        "ghee": "ennei",
+        "coconut": "thennai",
+        "mango": "maangai",
+        "fruit": "pazham",
+        "banana": "vazhaipazham",
+        "apple": "apple",
+        "orange": "orange",
+
+        # Objects
+        "pen": "pena",
+        "book": "puthagam",
+        "notebook": "note",
+        "pencil": "pencil",
+        "eraser": "eraser",
+        "ruler": "scale",
+        "bag": "bag",
+        "bottle": "bottle",
+        "tumbler": "tumbler",
+        "plate": "plate",
+        "bowl": "kuvalai",
+        "ladle": "karandi",
+        "tray": "thattu",
+        "corner": "moolai",
+        "table": "mesai",
+        "chair": "naarkali",
+        "bed": "kattil",
+        "mattress": "madai",
+        "pillow": "thuduppu",
+        "blanket": "koodal",
+        "shirt": "sattai",
+        "skirt": "pavaadai",
+        "pants": "panthu",
+        "saree": "sela",
+        "underwear": "kacchai",
+        "shoes": "kuttichi",
+        "sandals": "sandal",
+        "nose ring": "mookuthi",
+        "earring": "kadukkan",
+        "bangle": "valayal",
+        "ring": "mothiram",
+        "mangalsutra": "thali",
+        "bangle (worn)": "kaappu",
+
+        # Body parts
+        "head": "thalai",
+        "nose": "mooku",
+        "eye": "kannu",
+        "ear": "chevi",
+        "mouth": "vaay",
+        "tooth": "pal",
+        "tongue": "naakku",
+        "nostril": "mookuthi",
+        "hair": "mudi",
+        "hand": "kai",
+        "leg": "kaal",
+        "foot": "kaal",
+        "finger": "viramam",
+        "toe": "kaalviramam",
+        "stomach": "manusu",
+        "heart": "manusu",
+        "body": "udal",
+        "health": "udal nalam",
+        "disease": "kuttam",
+
+        # Daily actions
+        "he went": "sendraan",
+        "she went": "sendraal",
+        "he came": "vandhaan",
+        "she came": "vandhaal",
+        "is there": "irukku",
+        "exists": "irukku",
+        "not there": "illa",
+        "was there": "irundhu",
+        "wasn't there": "illaie",
+        "will buy": "vaangunu",
+        "will sell": "selvunu",
+        "I will go": "pogunnen",
+        "I will come": "varunnen",
+        "I will eat": "saapidren",
+        "I will drink": "kudippen",
+        "I will sleep": "urangaren",
+        "I woke up": "ezhunthen",
+        "I will read": "padippen",
+        "I will write": "eluthuven",
+        "I will speak": "pesuven",
+        "I will ask": "kelpen",
+        "I will listen": "ketpen",
+        "I will see": "paakren",
+        "I will walk": "nadappen",
+        "I will run": "ooduven",
+        "I will sit": "ukkaren",
+        "I will stand": "nilluven",
+        "I will return": "thirumbi varuven",
+
+        # Common phrases
         "very good": "romba nalla",
+        "very bad": "romba kettila",
+        "very beautiful": "romba azhagu",
+        "a little good": "konjam nalla",
+        "a little bad": "konjam kettila",
         "it is okay": "sari irukku",
+        "not okay": "sari illa",
+        "I know": "enakku theriyum",
+        "I don't know": "enakku theriyala",
+        "I understand": "enakku puriyum",
+        "I don't understand": "enakku puriyala",
+        "do you know?": "unakkum theriyuma",
+        "do you understand?": "unakkum puriyuma",
+        "how is it?": "epdi irukku",
+        "what are you doing?": "enna panra",
+        "what shall we do?": "enna panrom",
+        "where are we going?": "engay porom",
+        "when will you come?": "eppov varrom",
+        "when shall we go?": "eppov pogalam",
+        "come now": "ippo varu",
+        "go now": "ippo poga",
+        "come on time": "nerama vaa",
+        "give water": "thanni kudu",
+        "give food": "saapadu kudu",
+        "give coffee": "kaapi kudu",
+        "please give water": "thanni kudunga",
+        "please give food": "saapadu kudunga",
+        "what is this?": "idhu enna",
+        "what is that?": "adhu enna",
+        "this is for me": "idhu enakku",
+        "that is for you": "adhu unakku",
+        "this is good": "idhu nalla",
+        "that is bad": "adhu kettila",
+        "this is very good": "idhu romba nalla",
+        "that is very bad": "adhu romba kettila",
+        "thank you": "nandri",
+        "thank you very much": "romba nandri",
+        "you're welcome": "parava illa",
+        "no problem": "parava illa",
+        "excuse me": "mannikku",
+        "sorry": "mannikku",
+        "forgive me": "mannichu",
+        "I like it": "enakku manasu irukku",
+        "I don't like it": "enakku manasu illa",
+        "do you like it?": "unakku manasu irukka",
+        "I love you": "naan unnai nesikiren",
+        "good thing": "nalladhu",
+        "bad thing": "kettadhu",
+        "come": "vaa",
+        "go": "po",
+        "come (respectful)": "vaanga",
+        "sit": "irunga",
+        "stay": "irunga",
+        "stand": "nillunga",
+        "wait": "nillunga",
+        "take care": "paathukonga",
+        "protect": "kaapathunga",
+        "police": "kaaval",
+        "guard": "kaaval",
+        "doctor": "maruthuvar",
+        "medicine": "marunthu",
+        "give medicine": "marunthu kudu",
+        "take medicine": "marunthu saapidu",
+        "pain": "valiya irukku",
+        "headache": "thalai vali",
+        "stomach ache": "vayiru vali",
+        "hand pain": "kai vali",
+        "leg pain": "kaal vali",
+        "mistake": "tappu",
+        "I made a mistake": "tappu panniten",
+        "did you make a mistake?": "tappu pannungala",
+        "fix it": "seri pannu",
+        "I fixed it": "seri panninen",
+        "done": "mudichu",
+        "finished": "mudichu",
+        "cannot do": "mudiyala",
+        "can do": "mudiyum",
+        "sun": "veyil",
+        "heat": "veyil",
+        "rain": "mazhai",
+        "wind": "kaatru",
+        "fog": "pani",
+        "dew": "pani",
+        "lightning": "minnal",
+        "thunder": "idimuzhakkam",
+        "moonlight": "nilavu",
+        "you (respectful)": "ningal",
+        "you (plural)": "neenga",
+        "how": "eppadi",
+        "what": "enna",
+        "where": "enga",
+        "when": "eppov",
+        "who": "yaaru",
+        "why": "yen",
+        "how much": "evlo",
+        "what name": "enna per",
+        "my name": "en per",
+        "your name": "un per",
+        "his name": "avan per",
+        "her name": "aval per",
+        "my name": "ennoda per",
+        "your name": "unnoda per",
+        "this": "indha",
+        "that": "andha",
+        "this town": "indha oor",
+        "that town": "andha oor",
+        "this house": "indha veedu",
+        "that house": "andha veedu",
+        "this shop": "indha kadai",
+        "that shop": "andha kadai",
+        "this food": "indha saapadu",
+        "that food": "andha saapadu",
+        "this book": "indha pusthagam",
+        "that book": "andha pusthagam",
+        "this pen": "indha pen",
+        "that pen": "andha pen",
+        "this hand": "indha kai",
+        "that hand": "andha kai",
+        "this leg": "indha kaal",
+        "that leg": "andha kaal",
+        "this head": "indha thalai",
+        "that head": "andha thalai",
+        "this eye": "indha kannu",
+        "that eye": "andha kannu",
+        "this ear": "indha chevi",
+        "that ear": "andha chevi",
+        "this mouth": "indha vaay",
+        "that mouth": "andha vaay",
+        "this tooth": "indha pal",
+        "that tooth": "andha pal",
+        "this tongue": "indha naakku",
+        "that tongue": "andha naakku",
+        "this hair": "indha mudi",
+        "that hair": "andha mudi",
+        "this body": "indha udal",
+        "that body": "andha udal",
     }
 
     return _apply_word_map(english, mapping)

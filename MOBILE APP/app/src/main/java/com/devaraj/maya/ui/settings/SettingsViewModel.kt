@@ -1,6 +1,8 @@
 package com.devaraj.maya.ui.settings
 
 import android.app.Application
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -48,6 +50,7 @@ data class SettingsUiState(
     val voskBusy: Boolean = false,
     val voskProgress: Int? = null,
     val voskMessage: String? = null,
+    val screenSharing: Boolean = false,
 )
 
 class SettingsViewModel(
@@ -77,6 +80,11 @@ class SettingsViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val status = voskModelStore.status()
             _state.update { it.copy(voskModel = status) }
+        }
+        viewModelScope.launch {
+            ScreenCaptureService.running.collect { running ->
+                _state.update { it.copy(screenSharing = running) }
+            }
         }
     }
 
@@ -188,6 +196,28 @@ class SettingsViewModel(
             }
         }
     }
+
+    /**
+     * Starts MediaProjection capture after the user accepted the system consent dialog.
+     * The consent result must be consumed promptly, so the foreground service is started
+     * first (Android 14+ requires a mediaProjection FGS before getMediaProjection()).
+     */
+    fun startScreenShare(resultCode: Int, data: Intent) {
+        viewModelScope.launch {
+            val manager = app.getSystemService(MediaProjectionManager::class.java) ?: return@launch
+            // Android 14+ requires a mediaProjection-type foreground service to be
+            // running before getMediaProjection().
+            PhoneRemoteForegroundService.start(app)
+            delay(500)
+            val projection = runCatching { manager.getMediaProjection(resultCode, data) }.getOrNull() ?: return@launch
+            val metrics = app.resources.displayMetrics
+            ScreenCaptureService.start(
+                app, projection, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi,
+            )
+        }
+    }
+
+    fun stopScreenShare() { ScreenCaptureService.stop() }
 
     fun exportData(uri: Uri) {
         viewModelScope.launch {

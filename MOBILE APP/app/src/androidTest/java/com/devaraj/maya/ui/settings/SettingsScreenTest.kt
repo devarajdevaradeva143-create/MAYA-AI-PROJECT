@@ -54,6 +54,8 @@ class SettingsScreenTest {
                     onControlEnabledChange = {},
                     requireUnlock = true,
                     onRequireUnlockChange = {},
+                    phoneRemoteEnabled = false,
+                    onPhoneRemoteChange = {},
                     onExport = {},
                     onDeleteAll = {},
                     onConsumeExportStatus = {},

@@ -1,5 +1,8 @@
 package com.devaraj.maya.ui.settings
 
+import android.app.Activity
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -52,6 +56,9 @@ fun SettingsScreen(
     onRequireUnlockChange: (Boolean) -> Unit,
     phoneRemoteEnabled: Boolean,
     onPhoneRemoteChange: (Boolean) -> Unit,
+    screenSharing: Boolean = false,
+    onStartScreenShare: (Int, Intent) -> Unit = { _, _ -> },
+    onStopScreenShare: () -> Unit = {},
     onExport: (Uri) -> Unit,
     onDeleteAll: () -> Unit,
     onConsumeExportStatus: () -> Unit,
@@ -93,6 +100,19 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri != null) onImportVosk(uri)
+    }
+
+    val context = LocalContext.current
+    val projectionManager = remember(context) {
+        context.getSystemService(MediaProjectionManager::class.java)
+    }
+    val screenCaptureLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            onStartScreenShare(result.resultCode, data)
+        }
     }
 
     LaunchedEffect(state.exportStatus) {
@@ -202,6 +222,44 @@ fun SettingsScreen(
                 onClick = { onPhoneRemoteChange(true) },
                 label = { Text("Allow laptop to control this phone") },
             )
+        }
+
+        Text(
+            text = stringResource(R.string.screen_share_title),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(top = 16.dp),
+        )
+        Text(
+            text = stringResource(R.string.screen_share_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        if (screenSharing) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                FilterChip(
+                    selected = true,
+                    onClick = {},
+                    label = { Text(stringResource(R.string.screen_share_on)) },
+                )
+                OutlinedButton(onClick = onStopScreenShare) {
+                    Text(stringResource(R.string.screen_share_stop))
+                }
+            }
+        } else {
+            OutlinedButton(
+                enabled = projectionManager != null,
+                onClick = {
+                    val intent = projectionManager?.createScreenCaptureIntent() ?: return@OutlinedButton
+                    screenCaptureLauncher.launch(intent)
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text(stringResource(R.string.screen_share_start))
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))

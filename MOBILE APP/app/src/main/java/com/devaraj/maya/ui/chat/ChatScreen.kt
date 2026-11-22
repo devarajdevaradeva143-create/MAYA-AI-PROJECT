@@ -183,14 +183,24 @@ fun ChatScreen(
             )
         }
 
+        if (!state.canSend) {
+            Text(
+                text = stringResource(R.string.chat_no_source_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+
         Composer(
             input = input,
             onInputChange = { input = it },
             streaming = state.streaming,
-            canSend = state.canSend,
             onSend = {
                 val text = input
-                input = ""
+                // Keep the draft when there is no AI source so the user does
+                // not lose what they typed.
+                if (state.canSend) input = ""
                 onSend(text)
             },
             onStop = onStop,
@@ -353,7 +363,6 @@ private fun Composer(
     input: String,
     onInputChange: (String) -> Unit,
     streaming: Boolean,
-    canSend: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -366,9 +375,9 @@ private fun Composer(
         OutlinedTextField(
             value = input,
             onValueChange = { newValue ->
-                if (newValue.endsWith("\n") && newValue.trim().isNotEmpty() && canSend && !streaming) {
+                if (newValue.endsWith("\n") && newValue.trim().isNotEmpty() && !streaming) {
+                    // ChatScreen clears the draft only when a source exists.
                     onSend()
-                    onInputChange("")
                 } else {
                     onInputChange(newValue)
                 }
@@ -379,7 +388,7 @@ private fun Composer(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(
                 onSend = {
-                    if (input.isNotBlank() && canSend && !streaming) onSend()
+                    if (input.isNotBlank() && !streaming) onSend()
                 },
             ),
         )
@@ -397,12 +406,12 @@ private fun Composer(
         } else {
             IconButton(
                 onClick = onSend,
-                enabled = input.isNotBlank() && canSend,
+                enabled = input.isNotBlank(),
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = stringResource(R.string.chat_send),
-                    tint = if (input.isNotBlank() && canSend) {
+                    tint = if (input.isNotBlank()) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant

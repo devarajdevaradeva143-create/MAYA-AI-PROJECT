@@ -55,6 +55,25 @@ call extends it. Server restart drops all sessions.
 - Internet (WAN) remote control needs a relay/TLS design; use LAN/hotspot/USB
   in v1.
 
+## Laptop → phone control (v0.2)
+
+The reverse direction uses the phone's own server on **port 8421** (enabled in
+phone **Settings → Phone remote**). The laptop remembers the phone's last LAN IP
+(`last_ip`) after the first authenticated request, so **Phone Remote** can start
+a session without asking for the address again.
+
+1. Phone: enable **Settings → Phone remote** and the **Maya AI** accessibility
+   service (system Settings → Accessibility).
+2. Laptop: **Phone Remote** page → **Start session** → **Allow**.
+3. Tap/keys/text are injected through the accessibility service; **Stop session**
+   ends it.
+
+Current gap: the phone screen preview needs Android **MediaProjection**
+permission. Input control, session start/stop, and file APIs work; the laptop
+window stays blank until a screen-sharing consent screen is added to the phone
+app. Phone remote also stops when Android unbinds the accessibility service
+(e.g. after an app reinstall — re-enable it once).
+
 ## Troubleshooting
 
 | Symptom | Fix |

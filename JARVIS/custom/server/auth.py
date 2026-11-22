@@ -58,6 +58,7 @@ class DeviceRecord:
     last_seen: int
     expires_at: int
     app_version: str = ""
+    last_ip: str = ""
     revoked: bool = False
     # Phone stats (additive, optional)
     phone_battery_percent: int | None = None
@@ -79,6 +80,7 @@ class DeviceRecord:
             last_seen=int(data.get("last_seen", 0)),
             expires_at=int(data.get("expires_at", 0)),
             app_version=str(data.get("app_version", "")),
+            last_ip=str(data.get("last_ip", "")),
             revoked=bool(data.get("revoked", False)),
             phone_battery_percent=data.get("phone_battery_percent"),
             phone_storage_used_percent=data.get("phone_storage_used_percent"),
@@ -154,6 +156,7 @@ class TokenStore:
                 last_seen=stamp,
                 expires_at=expires_at,
                 app_version=app_version,
+                last_ip=existing.last_ip if existing else "",
                 revoked=False,
             )
             self._devices[device_id] = record
@@ -196,16 +199,26 @@ class TokenStore:
                 self._save()
             return True
 
-    def touch(self, device_id: str, now: float | None = None) -> None:
+    def touch(
+        self,
+        device_id: str,
+        now: float | None = None,
+        ip: str | None = None,
+    ) -> None:
         with self._lock:
             self._load()
             record = self._devices.get(device_id)
             if record is None:
                 return
             stamp = int(now if now is not None else time.time())
-            if stamp - record.last_seen < LAST_SEEN_THROTTLE_S:
+            ip_changed = bool(ip) and ip != "unknown" and ip != record.last_ip
+            if not ip_changed and stamp - record.last_seen < LAST_SEEN_THROTTLE_S:
                 return
             record.last_seen = stamp
+            if ip_changed:
+                # Remember where the paired phone connects from so the
+                # laptop can reach the phone's remote server (port 8421).
+                record.last_ip = str(ip)
             self._save()
 
     def update_token(
@@ -299,7 +312,7 @@ def authenticate(
     if record.is_expired(now):
         raise _auth_failure(limiter, ip, 1006, "Token expired")
 
-    tokens.touch(record.device_id, now)
+    tokens.touch(record.device_id, now, ip=ip)
     return record
 
 

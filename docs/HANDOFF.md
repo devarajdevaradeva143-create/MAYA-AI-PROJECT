@@ -153,13 +153,7 @@ corrupt-store preservation, sensitive-file deny-list and `--ask-code`.
    Tamil model, so this needs a different recogniser (e.g. Whisper) — a larger
    change, not just a download.
 
-3. **`maya-cloud` live call** (user action needed)
-   Code is complete, including `maya-cloud set-key` (hidden prompt → `.env`,
-   owner-only permissions). No key is configured yet; run
-   `maya-cloud set-key` or `python -m custom.cloud_cli set-key`.
-   See `docs/CLOUD.md`.
-
-4. **Windows tray** (done in LAPTOP/windows app)
+3. **Windows tray** (done in LAPTOP/windows app)
    The PySide6 app (`LAPTOP/windows`) now has a real tray (`--tray`),
    close-to-tray / minimize-to-tray / start-minimized settings, and a
    packaged `dist\mayaai.exe` with a desktop shortcut (`Desktop\Maya AI.lnk`).
@@ -168,20 +162,16 @@ corrupt-store preservation, sensitive-file deny-list and `--ask-code`.
    (`app/paths.py` + `custom/config.py` via `MAYA_AI_HOME`), never from the
    PyInstaller temp directory.
 
-5. **Fedora validation**
-   `maya.service` + `install_service.sh` exist but have not run on Fedora
-   hardware.
-
-6. **Language Intelligence**
+4. **Language Intelligence**
    `tools/language.py` translation functions are placeholders. Detect/phonetic
    helpers work; real Tamil↔English/Tanglish translation needs a model or a
    deliberate local implementation.
 
-7. **Mobile app** — in progress (`MOBILE APP/`): Phases 0-12 implemented,
+5. **Mobile app** — in progress (`MOBILE APP/`): Phases 0-12 implemented,
    debug + release APK built, Phase 9 on-device model (offline reply test)
    pending. See `MOBILE APP/PLAN.md` and `docs/PHASE9-ONDEVICE-MODEL.md`.
 
-8. **Cleanup (ask the user first)**
+6. **Cleanup (ask the user first)**
    Legacy duplicates: `MAYA AI/scripts/maya-launch.ps1`, `maya-launch.sh`,
    `LAPTOP/windows/app/autostart.ps1`. Old embedding cache
    `MAYA AI/Model/hf/hub/models--minishlab--potion-base-8M` (~29 MB).

@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,7 +69,7 @@ class ChatViewModel(
     apiClient: ApiClient,
     private val modelManager: OnDeviceModelManager,
     private val geminiRepository: GeminiRepository,
-    private val geminiApiKey: () -> String,
+    geminiApiKeyFlow: Flow<String>,
 ) : ViewModel() {
 
     private val socket = ChatSocket(apiClient, viewModelScope)
@@ -107,8 +108,11 @@ class ChatViewModel(
             socket.events.collect { event -> handleEvent(event) }
         }
         viewModelScope.launch {
-            // Cloud readiness: API key non-blank = cloud available
-            _state.update { it.copy(cloudReady = geminiApiKey().isNotBlank()) }
+            // Cloud readiness follows Settings live: entering a key must
+            // enable Send without recreating the ViewModel.
+            geminiApiKeyFlow.collect { key ->
+                _state.update { it.copy(cloudReady = key.isNotBlank()) }
+            }
         }
     }
 
@@ -130,7 +134,13 @@ class ChatViewModel(
         if (trimmed.isEmpty() || _state.value.streaming) return
 
         if (!_state.value.canSend) {
-            _state.update { it.copy(errorReason = MayaErrorReason.NO_CONNECTION, errorMessage = null) }
+            _state.update {
+                it.copy(
+                    errorReason = MayaErrorReason.NO_CONNECTION,
+                    errorMessage = "No AI source: connect to the laptop, download the " +
+                        "phone model, or add a Gemini API key in Settings.",
+                )
+            }
             return
         }
 
@@ -525,7 +535,7 @@ class ChatViewModel(
         private val apiClient: ApiClient,
         private val modelManager: OnDeviceModelManager,
         private val geminiRepository: GeminiRepository,
-        private val geminiApiKey: () -> String,
+        private val geminiApiKeyFlow: Flow<String>,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -534,7 +544,7 @@ class ChatViewModel(
             }
             return ChatViewModel(
                 chatRepository, connectionRepository, apiClient,
-                modelManager, geminiRepository, geminiApiKey,
+                modelManager, geminiRepository, geminiApiKeyFlow,
             ) as T
         }
     }

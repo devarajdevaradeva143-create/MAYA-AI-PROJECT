@@ -238,12 +238,21 @@ data class RemoteConfirmRequest(
 )
 
 @Serializable
+data class ScreenInfo(
+    val width: Int,
+    val height: Int,
+    val density: Int,
+)
+
+@Serializable
 data class RemoteStartResponse(
     val status: String,
     @SerialName("confirm_token") val confirmToken: String? = null,
     val description: String? = null,
     @SerialName("expires_in") val expiresIn: Int? = null,
     @SerialName("session_token") val sessionToken: String? = null,
+    @SerialName("ws_url") val wsUrl: String? = null,
+    val screen: ScreenInfo? = null,
 )
 
 @Serializable

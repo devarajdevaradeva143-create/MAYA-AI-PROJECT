@@ -48,6 +48,10 @@ class ScreenCaptureService private constructor(
         @Volatile
         private var instance: ScreenCaptureService? = null
 
+        /** True while frames are actually being captured; observed by the Settings UI. */
+        private val _running = MutableStateFlow(false)
+        val running: StateFlow<Boolean> = _running
+
         fun start(
             context: Context,
             mediaProjection: MediaProjection,
@@ -93,9 +97,21 @@ class ScreenCaptureService private constructor(
     private val _state = MutableStateFlow(CaptureState.IDLE)
     val state: StateFlow<CaptureState> = _state
 
+    // Android 14+ refuses createVirtualDisplay() unless a callback is registered,
+    // and the system ends the session through this callback when the user stops it.
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.d(TAG, "MediaProjection stopped by the system")
+            stop()
+        }
+    }
+
     private fun startCapture() {
         if (isCapturing.getAndSet(true)) return
         _state.value = CaptureState.STARTING
+
+        runCatching { mediaProjection.registerCallback(projectionCallback, handler) }
+            .onFailure { Log.w(TAG, "Could not register MediaProjection callback", it) }
 
         imageReader.setOnImageAvailableListener({ reader ->
             handler.post { onImageAvailable(reader) }
@@ -121,6 +137,7 @@ class ScreenCaptureService private constructor(
         }
 
         _state.value = CaptureState.RUNNING
+        _running.value = true
         Log.d(TAG, "Screen capture started: ${width}x${height}@${dpi}dpi")
     }
 
@@ -176,8 +193,12 @@ class ScreenCaptureService private constructor(
     }
 
     fun stop() {
+        _running.value = false
         if (!isCapturing.getAndSet(false)) return
         _state.value = CaptureState.STOPPING
+
+        runCatching { mediaProjection.unregisterCallback(projectionCallback) }
+            .onFailure { Log.w(TAG, "Could not unregister MediaProjection callback", it) }
 
         try {
             virtualDisplay?.release()

@@ -17,6 +17,7 @@ import com.devaraj.maya.data.remote.RemoteConfirmRequest
 import com.devaraj.maya.data.remote.RemoteSessionDto
 import com.devaraj.maya.data.remote.RemoteStartResponse
 import com.devaraj.maya.data.remote.RemoteStopRequest
+import com.devaraj.maya.data.remote.ScreenInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,6 +26,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -263,13 +265,13 @@ class PhoneRemoteHttpServer private constructor(
 
             when {
                 method == "POST" && path == "/phone/remote/start" -> handleStart(output, clientIp)
-                method == "POST" && path == "/phone/remote/confirm" -> handleConfirm(output, body, clientIp)
+                method == "POST" && path == "/phone/remote/confirm" -> handleConfirm(output, body, clientIp, s.localAddress.hostAddress)
                 method == "POST" && path == "/phone/remote/stop" -> handleStop(output, body, clientIp)
                 method == "POST" && path == "/phone/remote/input" -> handleInput(output, body, clientIp)
                 method == "POST" && path == "/phone/remote/files/list" -> handleFileList(output, body, clientIp)
                 method == "GET" && path.startsWith("/phone/remote/files/download") -> handleFileDownload(output, path, clientIp)
                 method == "POST" && path == "/phone/remote/files/upload" -> handleFileUpload(output, headers, input, clientIp)
-                path.startsWith("/phone/remote/ws") -> handleWebSocket(s, path, clientIp)
+                path.startsWith("/phone/remote/ws") -> handleWebSocket(s, path, clientIp, headers)
                 else -> sendResponse(output, 404, "Not Found", "text/plain")
             }
         }
@@ -321,8 +323,8 @@ class PhoneRemoteHttpServer private constructor(
         output.flush()
     }
 
-    private fun sendJson(output: java.io.OutputStream, status: Int, obj: Any) {
-        val json = Json { prettyPrint = false }.encodeToString(obj)
+    private inline fun <reified T> sendJson(output: java.io.OutputStream, status: Int, obj: T) {
+        val json = Json.encodeToString(obj)
         sendResponse(output, status, json, "application/json")
     }
 
@@ -356,7 +358,7 @@ class PhoneRemoteHttpServer private constructor(
         ))
     }
 
-    private fun handleConfirm(output: java.io.OutputStream, body: String, clientIp: String) {
+    private fun handleConfirm(output: java.io.OutputStream, body: String, clientIp: String, localIp: String) {
         val request = try {
             Json { ignoreUnknownKeys = true }.decodeFromString<RemoteConfirmRequest>(body)
         } catch (e: Exception) {
@@ -383,10 +385,17 @@ class PhoneRemoteHttpServer private constructor(
         // Start foreground service
         PhoneRemoteForegroundService.start(context)
 
+        val metrics = context.resources.displayMetrics
         sendJson(output, 200, RemoteStartResponse(
             status = "started",
             sessionToken = session.token,
+            wsUrl = "ws://$localIp:$PORT/phone/remote/ws?token=${session.token}",
             expiresIn = (PhoneRemoteHttpServer.SESSION_TTL_MS / 1000).toInt(),
+            screen = ScreenInfo(
+                width = metrics.widthPixels,
+                height = metrics.heightPixels,
+                density = metrics.densityDpi,
+            ),
         ))
     }
 
@@ -534,7 +543,7 @@ class PhoneRemoteHttpServer private constructor(
         sendJson(output, 501, FileUploadDto(status = "not_implemented", path = "", size = 0))
     }
 
-    private fun handleWebSocket(socket: Socket, path: String, clientIp: String) {
+    private fun handleWebSocket(socket: Socket, path: String, clientIp: String, headers: Map<String, String>) {
         val uri = Uri.parse("http://localhost$path")
         val token = uri.getQueryParameter("token")
         if (token.isNullOrBlank()) {
@@ -549,7 +558,7 @@ class PhoneRemoteHttpServer private constructor(
         }
 
         // Upgrade to WebSocket
-        if (!upgradeWebSocket(socket)) {
+        if (!upgradeWebSocket(socket, headers["sec-websocket-key"] ?: "")) {
             return
         }
 
@@ -612,15 +621,18 @@ class PhoneRemoteHttpServer private constructor(
                 wsJob.cancel()
             }
         }
+
+        // Keep this handler thread alive while the stream runs: handleClient wraps
+        // the socket in `use`, which would close it as soon as this returns.
+        runBlocking { wsJob.join() }
     }
 
-    private fun upgradeWebSocket(socket: Socket): Boolean {
-        // This is a simplified WebSocket upgrade - in production use a proper library
-        // For now, we'll send a basic 101 response
+    private fun upgradeWebSocket(socket: Socket, key: String): Boolean {
+        // Compute the Sec-WebSocket-Accept value from the client's key (RFC 6455).
         val response = "HTTP/1.1 101 Switching Protocols\r\n" +
             "Upgrade: websocket\r\n" +
             "Connection: Upgrade\r\n" +
-            "Sec-WebSocket-Accept: ${generateWebSocketAccept("")}\r\n\r\n"
+            "Sec-WebSocket-Accept: ${generateWebSocketAccept(key)}\r\n\r\n"
         try {
             socket.getOutputStream().write(response.toByteArray(StandardCharsets.UTF_8))
             socket.getOutputStream().flush()
