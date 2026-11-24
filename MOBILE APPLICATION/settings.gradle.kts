@@ -21,5 +21,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MayaAI"
+rootProject.name = "Mobile Application"
 include(":app")

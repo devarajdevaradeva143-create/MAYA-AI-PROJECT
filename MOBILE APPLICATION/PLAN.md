@@ -2065,5 +2065,5 @@ Native deps (Phase 9):
 
 ---
 
-**Next file to read:** `LAPTOP\windows\PLAN.md` (server side) + `docs\API-CONTRACT.md`.
+**Next file to read:** `WINDOWS APPLICATION\windows\PLAN.md` (server side) + `docs\API-CONTRACT.md`.
 **Build command:** `.\gradlew.bat assembleDebug`
