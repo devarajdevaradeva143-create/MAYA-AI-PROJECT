@@ -173,3 +173,63 @@ class IntelligenceBridge:
             return self._orchestrator.get_memory_stats()
         except Exception:
             return {}
+
+
+class IntelligentEngineAdapter:
+    """EnginePort-shaped wrapper around an IntelligenceBridge.
+
+    Lets the phone server (and any other EnginePort consumer) use the smart
+    layer without changing its call sites: ``chat(messages)`` pulls the last
+    user message, runs it through the bridge, and returns the reply.
+    """
+
+    def __init__(self, bridge: "IntelligenceBridge", fallback_engine: Any = None):
+        self._bridge = bridge
+        self._fallback = fallback_engine
+
+    @property
+    def model(self) -> str:
+        if self._fallback is not None:
+            return str(getattr(self._fallback, "model", "qwen3-5-2b-FLM"))
+        return "maya-intelligence"
+
+    @property
+    def engine_name(self) -> str:
+        return "maya-intelligence"
+
+    def health(self) -> dict[str, Any]:
+        if self._fallback is not None:
+            try:
+                return self._fallback.health()
+            except Exception:
+                pass
+        return {"ok": self._bridge.available}
+
+    def chat(self, messages: list[dict[str, str]]) -> str:
+        text = ""
+        persona_prompt = ""
+        for message in messages or []:
+            if message.get("role") == "system":
+                persona_prompt = str(message.get("content", ""))
+        for message in reversed(messages or []):
+            if message.get("role") == "user":
+                text = str(message.get("content", ""))
+                break
+        if not text.strip():
+            return ""
+        if persona_prompt.strip():
+            try:
+                self._bridge.set_persona(persona_prompt)
+            except Exception:
+                pass
+        try:
+            return self._bridge.chat(text)
+        except Exception as exc:
+            if self._fallback is not None:
+                return self._fallback.chat(messages)
+            raise
+
+    def chat_stream(self, messages: list[dict[str, str]]):
+        reply = self.chat(messages)
+        if reply:
+            yield reply
