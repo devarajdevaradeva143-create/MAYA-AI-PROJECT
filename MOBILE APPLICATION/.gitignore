@@ -1,0 +1,13 @@
+.gradle/
+build/
+app/build/
+local.properties
+keystore.properties
+*.jks
+*.keystore
+.idea/
+*.iml
+captures/
+.cxx/
+app/src/main/assets/models/*.gguf
+app/src/main/assets/piper/*.onnx
