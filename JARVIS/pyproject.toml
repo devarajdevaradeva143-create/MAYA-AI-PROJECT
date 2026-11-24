@@ -9,7 +9,7 @@ description = "Maya AI — custom local assistant code (OpenJarvis stays read-on
 readme = "custom/README.md"
 # Same interpreter range as JARVIS/OpenJarvis/pyproject.toml so the custom
 # package and the engine share ONE interpreter (3.13 via .python-version).
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "click",
     "pyyaml",

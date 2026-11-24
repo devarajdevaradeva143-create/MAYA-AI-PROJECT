@@ -1,0 +1,55 @@
+[project]
+name = "maya-windows"
+version = "0.1.0"
+description = "Maya AI Windows desktop app (local-first)"
+requires-python = ">=3.13,<3.14"
+
+dependencies = [
+    "maya-custom",
+    "PySide6==6.8.3",
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+    "pydantic==2.11.4",
+    "python-multipart==0.0.20",
+    "ruamel.yaml==0.18.10",
+    "qrcode[pil]==8.2",
+    "cryptography==45.0.3",
+    "pillow==11.2.1",
+    "pycaw==20240210",
+    "comtypes==1.4.17",
+    "send2trash==1.8.3",
+    "pystray==0.19.5",
+    "vosk==0.3.45",
+    "piper-tts==1.8.0",
+    "faster-whisper==1.2.1",
+    "av==18.1.0",
+    "pywin32>=312",
+    "zeroconf>=0.132",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.5",
+    "pytest-qt==4.4.0",
+    "ruff==0.11.10",
+    "pyinstaller==6.14.0",
+]
+
+[tool.uv.sources]
+maya-custom = { path = "../../JARVIS", editable = true }
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../..", "../../JARVIS"]
+qt_api = "pyside6"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

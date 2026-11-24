@@ -157,11 +157,12 @@ def version() -> None:
 
 @main.command()
 @click.argument("persona", required=False)
-def chat(persona: str | None = None) -> None:
+@click.option("--classic", is_flag=True, help="Use the raw engine chat (no intelligence layer).")
+def chat(persona: str | None = None, classic: bool = False) -> None:
     """Start interactive chat with Maya.
 
-    Usage: maya chat [persona]
-    Personas: girlfriend, english-teacher
+    Usage: maya chat [persona] [--classic]
+    Personas: girlfriend, english_teacher
     """
     security_manager.reload()
     if security_manager.is_session_locked():
@@ -183,73 +184,153 @@ def chat(persona: str | None = None) -> None:
     persona_prompt = load_persona(persona_name) or ""
     available = list_personas()
 
-    # Inject persona as system message
-    if persona_prompt:
-        history.set_system(persona_prompt)
+    # Intelligence layer (MAYA INTELLIGENCE). Falls back to classic chat.
+    bridge = None
+    if not classic:
+        from .intelligence_bridge import IntelligenceBridge
+
+        candidate = IntelligenceBridge()
+        if candidate.available:
+            bridge = candidate
+            bridge.set_persona(persona_prompt)
+        else:
+            _echo("Intelligence layer unavailable - using classic chat.")
+            if candidate.init_error:
+                _echo(f"  ({candidate.init_error})")
+            candidate.close()
+
+    if bridge is None:
+        # Classic path: inject persona as system message
+        if persona_prompt:
+            history.set_system(persona_prompt)
 
     _echo("\n--- Maya AI Chat ---")
     _echo(f"Persona: {persona_name}")
     _echo(f"Available: {', '.join(available)}")
+    _echo(f"Mode: {'classic' if bridge is None else 'intelligent'}")
     _echo("Commands: /quit, /clear, /persona <name>")
     _echo()
 
-    while True:
-        try:
-            user_input = input("You> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            _echo("\nGoodbye!")
-            break
+    try:
+        while True:
+            try:
+                user_input = input("You> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                _echo("\nGoodbye!")
+                break
 
-        if not user_input:
-            continue
+            if not user_input:
+                continue
 
-        cmd = user_input.lower()
+            cmd = user_input.lower()
 
-        # Handle commands
-        if cmd in ("/quit", "/exit", "/q"):
-            _echo("Goodbye!")
-            break
-        elif cmd == "/clear":
-            history.messages = []
-            if persona_prompt:
-                history.set_system(persona_prompt)
-            _echo("History cleared.")
-            continue
-        elif cmd.startswith("/persona"):
-            parts = cmd.split(None, 1)
-            if len(parts) == 2:
-                new_persona = parts[1].strip()
-                if new_persona in available:
-                    new_prompt = load_persona(new_persona) or ""
-                    history.set_persona(new_persona)
-                    if new_prompt:
-                        history.set_system(new_prompt)
-                    persona_name = new_persona
-                    persona_prompt = new_prompt
-                    _echo(f"Persona switched to: {persona_name}")
+            # Handle commands
+            if cmd in ("/quit", "/exit", "/q"):
+                _echo("Goodbye!")
+                break
+            elif cmd == "/clear":
+                if bridge is not None:
+                    bridge.clear()
+                history.messages = []
+                if persona_prompt:
+                    history.set_system(persona_prompt)
+                _echo("History cleared.")
+                continue
+            elif cmd.startswith("/persona"):
+                parts = cmd.split(None, 1)
+                if len(parts) == 2:
+                    new_persona = parts[1].strip()
+                    if new_persona in available:
+                        new_prompt = load_persona(new_persona) or ""
+                        history.set_persona(new_persona)
+                        if new_prompt:
+                            history.set_system(new_prompt)
+                        if bridge is not None:
+                            bridge.set_persona(new_prompt)
+                        persona_name = new_persona
+                        persona_prompt = new_prompt
+                        _echo(f"Persona switched to: {persona_name}")
+                    else:
+                        _echo(f"Unknown persona: {new_persona}")
+                        _echo(f"Available: {', '.join(available)}")
                 else:
-                    _echo(f"Unknown persona: {new_persona}")
+                    _echo(f"Current persona: {persona_name}")
                     _echo(f"Available: {', '.join(available)}")
-            else:
-                _echo(f"Current persona: {persona_name}")
-                _echo(f"Available: {', '.join(available)}")
-            continue
+                continue
 
-        # Add user message
-        history.add_user(user_input)
+            if bridge is not None:
+                reply = bridge.chat(user_input)
+                _echo(f"\nMaya: {reply}\n")
+                continue
 
-        # Generate Maya reply via engine bridge
-        messages = history.get_messages()
-        reply = engine_bridge.chat(messages)
+            # Classic path
+            history.add_user(user_input)
+            messages = history.get_messages()
+            reply = engine_bridge.chat(messages)
 
-        # Add assistant message (skip saving error replies)
-        if not reply.startswith("[engine error]"):
-            history.add_assistant(reply)
+            # Add assistant message (skip saving error replies)
+            if not reply.startswith("[engine error]"):
+                history.add_assistant(reply)
 
-        _echo(f"\nMaya: {reply}\n")
+            _echo(f"\nMaya: {reply}\n")
 
-        # Keep history manageable
-        history.trim(keep=19)
+            # Keep history manageable
+            history.trim(keep=19)
+    finally:
+        if bridge is not None:
+            bridge.close()
+
+
+@main.command()
+@click.argument("prompt", nargs=-1, required=True)
+@click.option("--persona", "persona_name", default=None, help="Persona to use for this reply.")
+@click.option("--classic", is_flag=True, help="Use the raw engine chat (no intelligence layer).")
+def ask(
+    prompt: tuple[str, ...],
+    persona_name: str | None = None,
+    classic: bool = False,
+) -> None:
+    """Ask Maya one question and print the answer.
+
+    Usage: maya ask "What is 17 * 24?"
+    """
+    security_manager.reload()
+    if security_manager.is_session_locked():
+        raise click.ClickException(LOCKED_MESSAGE)
+
+    text = " ".join(prompt).strip()
+    if not text:
+        _echo('Usage: maya ask "your question"')
+        return
+
+    history = ChatHistory()
+    selected = persona_name or history.persona
+    persona_prompt = load_persona(selected) or ""
+
+    def classic_reply() -> str:
+        messages = []
+        if persona_prompt:
+            messages.append({"role": "system", "content": persona_prompt})
+        messages.append({"role": "user", "content": text})
+        return engine_bridge.chat(messages)
+
+    if classic:
+        _echo(classic_reply())
+        return
+
+    from .intelligence_bridge import IntelligenceBridge
+
+    bridge = IntelligenceBridge()
+    try:
+        if not bridge.available:
+            _echo(f"Intelligence layer unavailable ({bridge.init_error}). Using classic chat.")
+            _echo(classic_reply())
+            return
+        if persona_prompt:
+            bridge.set_persona(persona_prompt)
+        _echo(bridge.chat(text))
+    finally:
+        bridge.close()
 
 
 @main.group()

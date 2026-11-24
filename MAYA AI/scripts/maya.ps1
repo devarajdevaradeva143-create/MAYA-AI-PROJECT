@@ -11,21 +11,14 @@ param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $maya = Join-Path $root "JARVIS"
+$venvPython = Join-Path $maya ".venv\Scripts\python.exe"
 
-if (-not (Test-Path $maya)) {
-    Write-Error "JARVIS folder not found at $maya"
+if (-not (Test-Path $venvPython)) {
+    Write-Error "JARVIS venv not found at $venvPython"
+    Write-Error "Please run 'uv sync' in the JARVIS directory first."
     exit 1
 }
 
-Push-Location $maya
-try {
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        Write-Error "uv not found. Install uv first: https://docs.astral.sh/uv/"
-        exit 1
-    }
-    uv run --python 3.13 maya @Rest
-    exit $LASTEXITCODE
-}
-finally {
-    Pop-Location
-}
+$env:PYTHONPATH = "$maya;$env:PYTHONPATH"
+& $venvPython -m custom.cli @Rest
+exit $LASTEXITCODE
