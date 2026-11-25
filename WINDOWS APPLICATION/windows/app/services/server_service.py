@@ -1,4 +1,4 @@
-﻿"""Phone server bootstrap: settings -> adapters -> uvicorn (headless).
+"""Phone server bootstrap: settings -> adapters -> uvicorn (headless).
 
 Runs the FastAPI app in a background thread with its own asyncio loop, so the
 Qt event loop (GUI mode) and the server never block each other.
@@ -179,7 +179,7 @@ def build_services(
         host=lan_ip(),
         version=__version__,
         platform=sys.platform,
-        model=str(getattr(engine, "model", "") or data.get("model", "qwen3-3b")),
+        model=str(getattr(engine, "model", "") or data.get("model", "qwen3.5-2b-FLM")),
         engine_name=str(getattr(engine, "engine_name", "lemonade")),
         screen=screen,
         input=input_adapter,

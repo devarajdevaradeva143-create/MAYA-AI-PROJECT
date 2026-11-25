@@ -47,7 +47,7 @@ def test_chat_returns_reply_and_persona_prompt(tmp_path) -> None:
     body = response.json()
     assert body["conversation_id"] == "c_01TEST"
     assert body["reply"] == "Vanakkam da!"
-    assert body["model"] == "qwen3-3b"
+    assert body["model"] == "qwen3.5-2b-FLM"
     assert body["engine"] == "lemonade"
     assert body["pending_action"] is None
     assert harness.engine.last_messages == [

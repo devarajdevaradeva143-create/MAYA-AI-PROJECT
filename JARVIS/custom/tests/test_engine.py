@@ -7,9 +7,7 @@ failure test uses a dead port and works without the server.
 
 from __future__ import annotations
 
-from typing import Any
 
-import pytest
 
 from custom.engine.bridge import EngineBridge, EngineError
 

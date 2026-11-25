@@ -1,7 +1,6 @@
 """Cognitive Intelligence (IQ) engine — answers and plans via engine + RAG."""
 
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass

@@ -100,7 +100,7 @@ def memory_add(ctx, category, key, value, sensitivity, allow_secret):
     """Add a memory entry."""
     store = ctx.obj["store"]
     try:
-        entry = store.add(category, key, value, sensitivity, allow_secret)
+        store.add(category, key, value, sensitivity, allow_secret)
         click.echo(f"Added: [{category}] {key} = {value[:50]}{'...' if len(value) > 50 else ''}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -163,7 +163,7 @@ def memory_edit(ctx, category, key, value, sensitivity, allow_secret):
     """Edit a memory entry."""
     store = ctx.obj["store"]
     try:
-        entry = store.update(category, key, value, sensitivity, allow_secret)
+        store.update(category, key, value, sensitivity, allow_secret)
         click.echo(f"Updated: [{category}] {key}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)

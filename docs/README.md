@@ -12,5 +12,6 @@ Maya AI notes and guides.
 | `DEVICES.md` | trusted pairing + HMAC-signed sync bundles |
 | `ROADMAP.md` | 13-phase build tracker and exit criteria |
 | `HANDOFF.md` | current state, environment, pending work for the next AI |
+| `IMPROVEMENT-PLAN.md` | deep-research improvement roadmap (P0/P1/P2) |
 | `WINDOWS-APP.md` | Windows desktop app features, run, test, build, security model |
 | `WINDOWS-APP-COMPLETION-PLAN.md` | Windows app pending work — phase-by-phase handoff plan |

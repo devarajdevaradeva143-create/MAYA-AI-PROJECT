@@ -1,7 +1,7 @@
 # MAYA AI — Plan (Simple Thanglish)
 
 > Ithu Maya AI project plan. Simple-ah, Thanglish-la.
-> Status: Design ready — build innum illa.
+> Status: Implemented — Windows app + Android app + CLI. Verified state: `docs/HANDOFF.md`.
 
 ---
 
@@ -23,7 +23,7 @@ Un laptop: **HP OmniBook 5 (Ryzen AI 5 340)**
 - NPU — Ryzen AI 50 TOPS, battery save 🔋
 - NVIDIA GPU — illa (AMD dhaan)
 
-**Model:** Qwen 3B — light + fast ✅
+**Model:** qwen3.5-2b-FLM (Lemonade, NPU) — fallback `qwen3-it-4b-FLM` ✅
 
 ---
 
@@ -31,17 +31,17 @@ Un laptop: **HP OmniBook 5 (Ryzen AI 5 340)**
 
 | # | Module | Status |
 |---|---|---|
-| 1 | 💬 Chat | ✅ Design ready |
-| 2 | 🎤 Voice | ✅ Design ready |
-| 3 | 🖥️ PC Control | ✅ Design ready |
-| 4 | 📱 Mobile Control | ✅ Android App Ready (APK built) |
-| 5 | 📚 English Teacher | ✅ Design ready |
-| 6 | 🔐 AI Identity & Security | ⏳ New — design |
-| 7 | 📊 System Monitoring | ⏳ New — design |
-| 8 | ⏰ Personal Assistant | ⏳ New — design |
-| 9 | 📖 Personal Knowledge AI | ⏳ New — design |
-| 10 | 🌐 Language Intelligence | ⏳ New — design |
-| 11 | 🔗 Multi-device Connection | ⏳ New — design |
+| 1 | 💬 Chat | ✅ Implemented |
+| 2 | 🎤 Voice | ◐ TTS works; Tamil STT pending |
+| 3 | 🖥️ PC Control | ✅ Implemented |
+| 4 | 📱 Mobile Control | ✅ Android app + LAN server |
+| 5 | 📚 English Teacher | ✅ Implemented |
+| 6 | 🔐 AI Identity & Security | ✅ PIN + face/voice + lock |
+| 7 | 📊 System Monitoring | ✅ Implemented |
+| 8 | ⏰ Personal Assistant | ◐ Todos/reminders; calendar basics |
+| 9 | 📖 Personal Knowledge AI | ✅ Implemented |
+| 10 | 🌐 Language Intelligence | ◐ Implemented; model-quality dependent |
+| 11 | 🔗 Multi-device Connection | ✅ Pairing + signed bundles |
 
 ---
 
@@ -51,7 +51,7 @@ Un laptop: **HP OmniBook 5 (Ryzen AI 5 340)**
 MAYA AI PROJECT\
 ├─ MAYA AI PROJECT.md     ← ithu plan
 ├─ MAYA AI\               ← rendu OS-kum common
-│  ├─ Model\              ← AI brain (Qwen 3B)
+│  ├─ Model\              ← local models (Kuyil/Vosk/Whisper); LLM = Lemonade
 │  ├─ Engine\             ← CPU / GPU / NPU
 │  ├─ voice\              ← Tamil / English voice
 │  ├─ persona\            ← Maya personality
@@ -64,7 +64,7 @@ MAYA AI PROJECT\
 ├─ WINDOWS APPLICATION\
 │  ├─ windows\            ← Windows app
 ├─ DEVARAJ\               ← un details + chat history
-├─ MOBILE APP\            ← appuram
+├─ MOBILE APPLICATION\   ← Android app
 └─ docs\                  ← notes
 ```
 
@@ -331,7 +331,7 @@ Ithu bonus features — core 11 modules-ku appuram.
 | 🎂 Birthday reminder | Important dates |
 
 **Rules:**
-- Ellam design only — build illa
+- Design + implementation — current status: `docs/HANDOFF.md`
 - Important action → permission ⚠️
 - Personal data cloud-kku poagadhu 🔒
 
@@ -343,7 +343,7 @@ Ithu 3 files-ah vera AI coder (Claude / Codex / Gemini / OpenCode) follow pannum
 
 | Enna | File |
 |---|---|
-| 📱 Mobile app (Android) | `MOBILE APP\PLAN.md` |
+| 📱 Mobile app (Android) | `MOBILE APPLICATION\PLAN.md` |
 | 💻 Windows app + phone server | `WINDOWS APPLICATION\windows\PLAN.md` |
 | 🔗 Phone ↔ laptop API | `docs\API-CONTRACT.md` |
 
@@ -359,7 +359,7 @@ Ithu 3 files-ah vera AI coder (Claude / Codex / Gemini / OpenCode) follow pannum
 
 1. Folder structure ✅ ready
 2. Plan ✅ ready
-3. AI model download — Qwen 3B
+3. AI model setup — Lemonade `qwen3.5-2b-FLM` ✅
 4. Engine setup (CPU / GPU / NPU)
 5. Basic chat app
 6. Voice + persona

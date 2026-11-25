@@ -1,6 +1,5 @@
 """Tests for AQ engine."""
 
-import pytest
 
 
 def test_aq_open_app(mock_pc, mock_assistant, mock_knowledge):

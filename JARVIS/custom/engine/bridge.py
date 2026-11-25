@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from pathlib import Path
 from typing import Any, Iterator
 
 import httpx
@@ -57,10 +56,8 @@ class EngineBridge:
         self.mode = mode or str(engine_cfg.get("mode", "direct"))
         self.engine_type = str(engine_cfg.get("type", "lemonade"))
         self.host = str(engine_cfg.get("host", DEFAULT_HOST)).rstrip("/")
-        # Prefer engine.model; fall back to the top-level model setting.
-        self.model = str(
-            engine_cfg.get("model", settings.get("model", DEFAULT_MODEL))
-        )
+        # engine.model is the single source of truth.
+        self.model = str(engine_cfg.get("model", DEFAULT_MODEL))
         self.fallback_model = str(
             engine_cfg.get("fallback_model", DEFAULT_FALLBACK_MODEL)
         )

@@ -1,6 +1,5 @@
 """Language adapter — wraps custom.tools.language."""
 
-from typing import Any
 
 from ..language import detect_language as _detect_chat_language
 

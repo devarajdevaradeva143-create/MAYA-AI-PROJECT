@@ -16,7 +16,6 @@ from __future__ import annotations
 import socket
 import struct
 import threading
-from typing import Any
 
 LENGTH_PREFIX = 4
 MAX_FRAME_BYTES = 16 * 1024 * 1024

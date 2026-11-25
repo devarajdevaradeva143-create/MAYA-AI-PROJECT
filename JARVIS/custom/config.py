@@ -93,6 +93,8 @@ def load_settings() -> dict:
             data = yaml.safe_load(f)
         if data is None:
             return _default_settings()
+        if isinstance(data, dict):
+            _warn_legacy_keys(data)
         return data
     except Exception as exc:
         if click:
@@ -104,6 +106,20 @@ def load_settings() -> dict:
         else:
             print(f"[config] Error reading {MAYA_AI_CONFIG}: {exc}. Using default settings.", file=sys.stderr)
         return _default_settings()
+
+
+def _warn_legacy_keys(data: dict) -> None:
+    """Warn about pre-`engine.model` keys so old configs get migrated."""
+    if "model" not in data and "mode_model" not in data:
+        return
+    message = (
+        "[config] Legacy key(s) 'model'/'mode_model' ignored; "
+        "use engine.model in settings.yaml."
+    )
+    if click:
+        click.echo(message, err=True)
+    else:
+        print(message, file=sys.stderr)
 
 
 def _default_settings() -> dict:
@@ -129,8 +145,6 @@ def _default_settings() -> dict:
             "clap": {"threshold": 2800, "count": 3, "min_gap": 0.12, "max_gap": 0.9},
         },
         "persona": "girlfriend",
-        "model": "qwen3-3b",
-        "mode_model": "3b",
         "web_search": "ask",
         "web_allowed_topics": "news,world news,ai,it,technology",
         "memory_offline": "memory/offline",

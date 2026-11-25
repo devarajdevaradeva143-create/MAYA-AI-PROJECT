@@ -22,13 +22,15 @@ class AQEngine:
         assistant_adapter,
         knowledge_adapter,
         monitor_adapter=None,
-        confirm_fn: Callable[[str], bool] = None,
+        confirm_fn: Callable[[str], bool] | None = None,
     ):
         self._pc = pc_adapter
         self._assistant = assistant_adapter
         self._knowledge = knowledge_adapter
         self._monitor = monitor_adapter
-        self._confirm = confirm_fn or (lambda msg: True)
+        # Secure default: without an explicit confirmation callback,
+        # destructive actions are denied instead of auto-approved.
+        self._confirm = confirm_fn or (lambda msg: False)
 
         # Wire permission gate for pc_control
         self._wire_permission_gate()

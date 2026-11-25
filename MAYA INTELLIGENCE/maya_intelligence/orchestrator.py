@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from .adapters import (
     EngineAdapter,
@@ -558,7 +558,6 @@ class Orchestrator:
     def _extract_facts(self, text: str) -> list[tuple[str, str, str]]:
         """Extract durable personal facts from a message."""
         facts: list[tuple[str, str, str]] = []
-        lower = text.lower()
 
         for pattern in self._NAME_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)

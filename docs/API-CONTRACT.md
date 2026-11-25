@@ -4,10 +4,10 @@
 > Vera AI code pannum bothu ithai first padikkum.
 > Simple Thanglish-la ezhuthirukken.
 
-**Status:** Design locked (v1) — implementation innum illa.
+**Status:** Implemented (v1) — laptop server + Android client.
 **Owner files:**
 - Server: `JARVIS\custom\server\` (Windows)
-- Client: `MOBILE APP\app\src\main\java\com\devaraj\maya\data\remote\`
+- Client: `MOBILE APPLICATION\app\src\main\java\com\devaraj\maya\data\remote\`
 - Plans: `MOBILE APPLICATION\PLAN.md`, `WINDOWS APPLICATION\windows\PLAN.md`
 
 ---
@@ -193,7 +193,7 @@ No auth. Personal data illa.
   "version": "0.1.0",
   "api": 1,
   "platform": "windows",
-  "model": "qwen3-3b",
+  "model": "qwen3.5-2b-FLM",
   "engine": "lemonade",
   "capabilities": [
     "chat",
@@ -320,7 +320,7 @@ Success:
 {
   "conversation_id": "c_01JABCDEF",
   "reply": "Ippo 7:42 PM da.",
-  "model": "qwen3-3b",
+  "model": "qwen3.5-2b-FLM",
   "engine": "lemonade",
   "elapsed_ms": 1830,
   "pending_action": null
@@ -356,7 +356,7 @@ Client → server:
 Server → client:
 
 ```json
-{ "type": "start", "conversation_id": "c_01JABCDEF", "model": "qwen3-3b" }
+{ "type": "start", "conversation_id": "c_01JABCDEF", "model": "qwen3.5-2b-FLM" }
 { "type": "token", "text": "Van" }
 { "type": "token", "text": "akkam" }
 { "type": "done", "elapsed_ms": 1830, "tokens": 42, "pending_action": null }
@@ -1212,7 +1212,7 @@ JARVIS\custom\server\
 ### Phone (Android)
 
 ```
-MOBILE APP\app\src\main\java\com\devaraj\maya\
+MOBILE APPLICATION\app\src\main\java\com\devaraj\maya\
 ├─ data\remote\
 │  ├─ WanRemoteClient.kt      # WSS client + relay
 │  ├─ BluetoothRemoteClient.kt # PAN/RFCOMM client

@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint + encoding guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff
+        run: python -m pip install "ruff==0.11.10"
+
+      - name: Ruff (core + intelligence + Windows app)
+        run: |
+          ruff check JARVIS/custom "MAYA INTELLIGENCE" "WINDOWS APPLICATION/windows/app" "WINDOWS APPLICATION/windows/tests"
+
+      - name: UTF-8 BOM guard
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+
+          suffixes = {
+              ".py", ".md", ".yaml", ".yml", ".toml", ".kt", ".kts",
+              ".json", ".txt", ".xml", ".properties", ".gradle", ".cfg",
+              ".ini", ".ps1", ".sh", ".bat", ".cmd",
+          }
+          files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
+          bad = [
+              path
+              for path in files
+              if Path(path).suffix.lower() in suffixes
+              and "llama.cpp" not in Path(path).parts
+              and Path(path).read_bytes().startswith(b"\xef\xbb\xbf")
+          ]
+          if bad:
+              raise SystemExit("UTF-8 BOM found:\n" + "\n".join(bad))
+          print("No UTF-8 BOM found")
+          PY
+
+  test-core:
+    name: Core tests (JARVIS/custom)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: JARVIS/pyproject.toml
+
+      - name: Install core package
+        run: python -m pip install -e "JARVIS[dev]"
+
+      - name: Run core tests
+        run: python -m pytest JARVIS/custom/tests -q
+
+  test-intelligence:
+    name: Intelligence tests (MAYA INTELLIGENCE)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: JARVIS/pyproject.toml
+
+      - name: Install core package
+        run: python -m pip install -e "JARVIS[dev]"
+
+      - name: Run intelligence tests
+        working-directory: MAYA INTELLIGENCE
+        run: python -m pytest tests -q

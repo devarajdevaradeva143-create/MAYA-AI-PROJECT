@@ -59,15 +59,20 @@ class PhoneRemoteClient:
         return f"http://{host}:{port}"
 
     def _get_paired_phone_ip(self) -> str | None:
-        """Get the IP of the currently paired phone from the laptop server."""
+        """Get the last known LAN IP of the most recently seen paired phone."""
         service = shared_server_service()
         if not service.running:
             return None
         tokens = service.app.state.tokens
-        devices = tokens.list_active()
+        devices = sorted(
+            tokens.list_active(),
+            key=lambda d: getattr(d, "last_seen", 0) or 0,
+            reverse=True,
+        )
         for d in devices:
-            if d.last_seen > 0:
-                return d.host if hasattr(d, 'host') else None
+            ip = (getattr(d, "last_ip", "") or "").strip()
+            if ip:
+                return ip
         return None
 
     def start_session(

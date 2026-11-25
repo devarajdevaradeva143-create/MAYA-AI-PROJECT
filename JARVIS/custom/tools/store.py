@@ -26,7 +26,6 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from ..config import PROJECT_ROOT, load_settings
 

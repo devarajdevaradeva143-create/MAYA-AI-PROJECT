@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 1 | Foundation: `pyproject.toml`, CLI bugs, persistence, tests | coder → tester → reviewer | ✅ Done |
 | 2 | OpenJarvis install + engine bridge | coder, debugger | ✅ Done |
-| 3 | Qwen 3B download + CPU/GPU/NPU config | coder, debugger | ✅ Done |
+| 3 | Lemonade `qwen3.5-2b-FLM` + CPU/GPU/NPU config | coder, debugger | ✅ Done |
 | 4 | Real chat wiring + persona + English teacher | coder, tester, reviewer | ✅ Done |
 | 5 | Tools hardening: monitor loop, knowledge index, assistant | coder, database, tester | ✅ Done |
 | 6 | Security: PIN (biometrics moved to Phase 11) | security, coder, tester | ✅ Done |

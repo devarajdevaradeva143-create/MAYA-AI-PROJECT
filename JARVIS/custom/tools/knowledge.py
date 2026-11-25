@@ -8,7 +8,6 @@ Per AGENTS.md: Personal knowledge base laptop-la mattum, cloud-kku poagadhu.
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 

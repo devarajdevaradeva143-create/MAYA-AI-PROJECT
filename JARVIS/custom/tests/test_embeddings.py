@@ -1,6 +1,5 @@
 """Embedding wrapper tests — no model download, no network."""
 
-import pytest
 
 from custom import config
 from custom.tools import embeddings

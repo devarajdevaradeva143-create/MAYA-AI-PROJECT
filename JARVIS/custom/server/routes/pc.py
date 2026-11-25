@@ -15,7 +15,6 @@ from custom.server.models import (
     PcCommandResponse,
     PcConfirmRequest,
     DeviceStatusRequest,
-    PhoneStats,
 )
 
 router = APIRouter(prefix="/pc", tags=["pc"])

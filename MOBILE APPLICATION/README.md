@@ -12,7 +12,7 @@ Ithula Android phone-la run aagura **Maya AI** app irukkum.
 Ella design decision-um ithula irukku:
 
 ```
-MOBILE APP\PLAN.md
+MOBILE APPLICATION\PLAN.md
 ```
 
 ## Shared API

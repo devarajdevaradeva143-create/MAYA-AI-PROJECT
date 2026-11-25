@@ -286,7 +286,7 @@ def make_harness(
         laptop_name="Test-Laptop",
         host="192.168.1.50",
         platform="windows",
-        model="qwen3-3b",
+        model="qwen3.5-2b-FLM",
         engine_name="lemonade",
         persona_prompts={"maya": "MAYA PROMPT", "teacher": "TEACHER PROMPT"},
         started_at=time.time() - 60,

@@ -28,7 +28,7 @@ def test_health_shape_without_auth(tmp_path) -> None:
     assert body["app"] == "maya-laptop"
     assert body["api"] == 1
     assert body["platform"] == "windows"
-    assert body["model"] == "qwen3-3b"
+    assert body["model"] == "qwen3.5-2b-FLM"
     assert body["engine"] == "lemonade"
     assert "chat" in body["capabilities"]
     assert "voice_stt" in body["capabilities"]

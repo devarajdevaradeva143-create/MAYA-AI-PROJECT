@@ -1,6 +1,5 @@
 """Tests for EQ engine."""
 
-import pytest
 
 
 def test_eq_analyze_sad():

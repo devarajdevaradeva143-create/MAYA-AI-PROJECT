@@ -30,9 +30,7 @@ wake:
 # persona
 persona: persona/girlfriend.md
 
-# model
-model: qwen3-3b
-mode_model: 3b
+# model — single source of truth is engine.model below (top-level `model` is legacy).
 
 # engine — inference backend (lemonade / openjarvis). Code reads this; never hardcode.
 engine:
@@ -107,15 +105,15 @@ permissions:
 # 11 modules
 features:
   chat: true
-  voice: partial          # English works; Tamil TTS/STT pending
+  voice: partial          # TTS works (Kuyil/Piper); Tamil STT pending
   pc_control: true
-  mobile_control: plan    # plan ready — appuram
+  mobile_control: true    # Android app + LAN phone server
   english_teacher: true
   identity_security: true      # PIN + face/voice + lock + session watchdog
   system_monitoring: true
   personal_assistant: partial  # todos/reminders; calendar basics
   knowledge_ai: true
-  language_intelligence: partial  # detect/pronunciation; translations stub
+  language_intelligence: partial  # detect/translate/transliterate; model quality dependent
   multi_device: partial    # pairing + signed bundles; live transport pending
   extra_features: design   # OCR, briefing, focus, expense, media, cleanup, etc.
 
@@ -220,8 +218,9 @@ server:
     mode: lan            # lan | wan
 
 # desktop UI
-  auto_start: true
+  auto_start: false
 ui:
+  auto_start: true
   theme: system          # dark | light | system
   window_width: 1180
   window_height: 760

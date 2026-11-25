@@ -20,8 +20,8 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-from custom.tools.path_guard import is_path_allowed, restrict_to_allowed
-from custom.tools.control_guard import is_command_blocked, safe_cmd
+from custom.tools.path_guard import is_path_allowed
+from custom.tools.control_guard import is_command_blocked
 
 # The desktop UI / phone server installs a gate for an approved action so the
 # console prompt below is never reached in headless mode.

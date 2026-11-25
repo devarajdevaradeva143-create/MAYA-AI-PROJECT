@@ -8,7 +8,6 @@ so that file operations never escape the user's laptop.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 # These are the allowed roots — set from settings.yaml "server.allowed_roots"
 # or default to the user's desktop/My Documents area.
@@ -39,7 +38,7 @@ def restrict_to_allowed(path: Path | str) -> Path | None:
     p = Path(path).resolve()
     for root in _ALLOWED_ROOTS:
         try:
-            rel = p.relative_to(Path(root).resolve())
+            p.relative_to(Path(root).resolve())
             return p  # allowed
         except ValueError:
             continue

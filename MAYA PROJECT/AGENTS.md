@@ -11,7 +11,7 @@
 **Maya AI** — local-first personal AI assistant for Windows.
 
 - Laptop: HP OmniBook 5 (Ryzen AI 5 340)
-- Model: **Qwen 3B**
+- Model: **qwen3.5-2b-FLM** (Lemonade, NPU; fallback `qwen3-it-4b-FLM`)
 - Framework: **OpenJarvis** (clone pannirukkom)
 - Online AI: **Gemini** (separate command)
 
@@ -36,8 +36,8 @@
 
 ```
 MAYA AI PROJECT\
-├─ MAYA AI PROJECT.md        ← plan (design)
-├─ AGENTS.md                 ← ithu file (AI guide)
+├─ MAYA PROJECT\MAYA AI PROJECT.md  ← plan (design)
+├─ MAYA PROJECT\AGENTS.md           ← ithu file (AI guide)
 ├─ docs\                     ← notes, guides
 └─ DEVARAJ\                  ← user details + chat history (private)
 ```
@@ -52,7 +52,7 @@ MAYA AI PROJECT\
 
 ```
 MAYA AI PROJECT\MAYA AI\
-├─ Model\        ← Qwen 3B model files
+├─ Model\        ← local model files (Kuyil/Vosk/Whisper); LLM = Lemonade
 ├─ Engine\       ← CPU / GPU / NPU backends
 ├─ voice\        ← Tamil / English TTS
 ├─ persona\      ← Maya + English teacher prompts
@@ -122,14 +122,14 @@ MAYA AI PROJECT\WINDOWS APPLICATION\
 | Chat | `custom\` + OpenJarvis chat |
 | Voice | `custom\tools\` + `MAYA AI\voice\` |
 | PC Control | `custom\tools\pc_control.py` |
-| Mobile Control | `MOBILE APP\` (future) |
+| Mobile Control | `MOBILE APPLICATION\` + `JARVIS\custom\server\` |
 | English Teacher | `custom\persona\` + `MAYA AI\persona\` |
 | Identity & Security | `MAYA AI\security\` + `custom\tools\` |
 | System Monitoring | `custom\tools\monitor.py` |
 | Personal Assistant | `custom\tools\assistant.py` |
 | Knowledge AI | `custom\tools\knowledge.py` + `MAYA AI\knowledge\` |
 | Language Intelligence | `custom\tools\language.py` |
-| Multi-device | `custom\tools\devices.py` (future) |
+| Multi-device | `custom\tools\devices.py` + LAN phone server |
 
 ---
 

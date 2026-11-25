@@ -224,7 +224,7 @@ class IntelligentEngineAdapter:
                 pass
         try:
             return self._bridge.chat(text)
-        except Exception as exc:
+        except Exception:
             if self._fallback is not None:
                 return self._fallback.chat(messages)
             raise

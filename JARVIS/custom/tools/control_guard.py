@@ -11,7 +11,6 @@ confirmation step is the primary safety gate.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 # Commands that are always blocked unless an explicit allow-passes through
 # the permission gate. These are shell‑level blocks; the UI ConfirmDialog

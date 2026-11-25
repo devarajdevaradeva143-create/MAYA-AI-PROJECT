@@ -255,7 +255,7 @@ def get_ssd_health() -> Dict[str, Any]:
             ["smartctl", "-H", "/dev/sda"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
-            line = [l for l in result.stdout.splitlines() if "SMART" in l.upper()]
+            line = [entry for entry in result.stdout.splitlines() if "SMART" in entry.upper()]
             if "PASSED" in line[0].upper() if line else False:
                 return {"health": "good", "tool": "smartctl", "detail": result.stdout[:200]}
 

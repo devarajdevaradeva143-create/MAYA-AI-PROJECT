@@ -159,13 +159,14 @@ corrupt-store preservation, sensitive-file deny-list and `--ask-code`.
    PyInstaller temp directory.
 
 4. **Language Intelligence**
-   `tools/language.py` translation functions are placeholders. Detect/phonetic
-   helpers work; real Tamil↔English/Tanglish translation needs a model or a
-   deliberate local implementation.
+   `tools/language.py` implements detection, translation (local engine +
+   dictionary fallback + optional dedicated model) and transliteration.
+   Quality depends on the local model; Tamil/Tanglish is still the weak spot.
 
-5. **Mobile app** — in progress (`MOBILE APP/`): Phases 0-12 implemented,
-   debug + release APK built, Phase 9 on-device model (offline reply test)
-   pending. See `MOBILE APP/PLAN.md` and `docs/PHASE9-ONDEVICE-MODEL.md`.
+5. **Mobile app** — implemented (`MOBILE APPLICATION/`): Phases 0-12 done,
+   debug + release APK built, Phase 9 native model path wired (model file and
+   offline chat fallback optional). See `MOBILE APPLICATION/PLAN.md` and
+   `docs/PHASE9-ONDEVICE-MODEL.md`.
 
 6. **Cleanup (ask the user first)**
    Legacy duplicates: `MAYA AI/scripts/maya-launch.ps1`, `maya-launch.sh`,

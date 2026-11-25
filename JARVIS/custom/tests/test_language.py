@@ -47,7 +47,7 @@ def test_pronunciation_guide():
     """Pronunciation guide should return a dict."""
     guide = pronunciation_guide("hello")
     assert isinstance(guide, dict), f"Expected dict, got {type(guide)}"
-    assert "word" in guide, f"Expected 'word' key in guide"
+    assert "word" in guide, "Expected 'word' key in guide"
 
 
 def test_tanglish_to_english():

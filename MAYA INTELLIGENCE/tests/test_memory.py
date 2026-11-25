@@ -95,7 +95,6 @@ def test_memory_stats(memory_store):
 
 def test_memory_override_env(temp_db):
     """Test MAYA_INTEL_DB environment variable override."""
-    import os
     from maya_intelligence.memory import MemoryStore
 
     # Store should use the temp_db from env

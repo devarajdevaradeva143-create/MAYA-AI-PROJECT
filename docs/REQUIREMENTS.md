@@ -91,5 +91,5 @@ One MAYA AI controlling Windows, two apps (Windows/Android), three modes (AI/REM
 | Dual-boot awareness | N/A | N/A |
 
 Windows app reference: `WINDOWS APPLICATION/windows/README.md` (build complete, tests pass).  
-Android app reference: `MOBILE APP/README.md` (build complete, phases 0-12).
+Android app reference: `MOBILE APPLICATION/README.md` (build complete, phases 0-12).
 path: C:\Users\devar\Desktop\MAYA AI PROJECT\docs\REQUIREMENTS.md

@@ -11,9 +11,8 @@ user never sees duplicate output.
 Maya = command only — these functions run when the owner calls them.
 """
 
-from datetime import datetime, date
+from datetime import datetime
 import threading
-import time
 
 from .store import JsonStore
 

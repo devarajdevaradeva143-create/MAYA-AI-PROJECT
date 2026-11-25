@@ -7,7 +7,7 @@
 **Status:** Phases 0-12 implemented (Phase 9 native build + JNI wired; model file + chat fallback optional). Debug + Release APK build & install.
 **App name:** Maya AI
 **Package:** `com.devaraj.maya`
-**Project folder:** `C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APP\`
+**Project folder:** `C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APPLICATION\`
 
 ---
 
@@ -24,7 +24,7 @@ Phase 3 (pairing) + Phase 4 (chat) mudiyum pothu laptop server (Windows plan Pha
 
 **Hard rules (repeat):**
 - `JARVIS\OpenJarvis\` — **READ ONLY** ❌ (mobile repo-la thoda vendam)
-- Ellam code `MOBILE APP\` la mattum ✅
+- Ellam code `MOBILE APPLICATION\` la mattum ✅
 - Cloud / Gemini / analytics / ads **illa** ❌
 - Personal data phone-la mattum 🔒
 - Important action → user permission ⚠️
@@ -38,7 +38,7 @@ Maya AI mobile app — Android phone-la run aagum personal assistant.
 
 Three jobs:
 
-1. **Laptop remote** — WiFi / USB / Bluetooth-la laptop Maya AI-ah use pannum (full Qwen 3B power).
+1. **Laptop remote** — WiFi / USB / Bluetooth-la laptop Maya AI-ah use pannum (full qwen3.5-2b-FLM power).
 2. **Phone AI** — laptop illa-na phone-la tamil-lm-2b 2B (offline fallback).
 3. **Phone + laptop control** — chat command moolam apps, files, messages, system.
 
@@ -58,7 +58,7 @@ Maya = **command only**. Thana ethuvum pannadhu ❌.
 | App UI language | English |
 | Themes | Dark + Light + System |
 | Phone model | tamil-lm-2b Instruct (Q4_K_M GGUF) |
-| Laptop model | Qwen 3B |
+| Laptop model | qwen3.5-2b-FLM |
 | Connection | WiFi + Bluetooth + USB |
 | Internet remote | **Ippo venam** ❌ |
 | Pairing | PIN + QR secure; auto-connect optional (user choice) |
@@ -116,7 +116,7 @@ Maya = **command only**. Thana ethuvum pannadhu ❌.
 ┌───────▼─────────┐
          │  LAPTOP SERVER  │
          │  FastAPI :8420  │
-         │  Qwen 3B        │
+         │  qwen3.5-2b-FLM        │
          │  Windows        │
          └─────────────────┘
 ```
@@ -170,7 +170,7 @@ Maya = **command only**. Thana ethuvum pannadhu ❌.
 ### 6.1 Folder create
 
 ```
-MOBILE APP\
+MOBILE APPLICATION\
 ├─ PLAN.md
 ├─ README.md
 ├─ settings.gradle.kts
@@ -469,7 +469,7 @@ app/src/main/assets/piper/*.onnx
 **Option A — winget:**
 ```powershell
 winget install --id Gradle.Gradle -e
-cd "C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APP"
+cd "C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APPLICATION"
 gradle wrapper --gradle-version 8.11.1
 ```
 
@@ -478,7 +478,7 @@ gradle wrapper --gradle-version 8.11.1
 $dst = "$env:TEMP\gradle-8.11.1-bin.zip"
 Invoke-WebRequest "https://services.gradle.org/distributions/gradle-8.11.1-bin.zip" -OutFile $dst
 Expand-Archive $dst "$env:TEMP\gradle-8.11.1" -Force
-cd "C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APP"
+cd "C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APPLICATION"
 & "$env:TEMP\gradle-8.11.1\gradle-8.11.1\bin\gradle.bat" wrapper --gradle-version 8.11.1
 ```
 
@@ -1965,7 +1965,7 @@ Tasks:
 ## 26. Build & run commands
 
 ```powershell
-cd "C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APP"
+cd "C:\Users\devar\Desktop\MAYA AI PROJECT\MOBILE APPLICATION"
 
 # Debug APK
 .\gradlew.bat assembleDebug

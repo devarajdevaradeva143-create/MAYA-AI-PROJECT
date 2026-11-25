@@ -278,7 +278,7 @@ class TranslationModel:
             translation_compute_type: "int8"  # or "fp16", "fp32"
     """
 
-    _instance: Optional["TranslationModel"] = None
+    _instance: TranslationModel | None = None
     _lock = threading.Lock()
 
     def __new__(cls) -> "TranslationModel":
@@ -296,10 +296,10 @@ class TranslationModel:
 
         self._model = None
         self._tokenizer = None
-        self._model_name: Optional[str] = None
+        self._model_name: str | None = None
         self._device: str = "cpu"
         self._compute_type: str = "int8"
-        self._load_error: Optional[str] = None
+        self._load_error: str | None = None
         self._lang_codes: Dict[str, str] = {}
         self._load_config()
 
@@ -323,7 +323,7 @@ class TranslationModel:
         """Return True if the model is loaded and ready."""
         return self._model is not None and self._tokenizer is not None
 
-    def load_error(self) -> Optional[str]:
+    def load_error(self) -> str | None:
         """Return the last load error, if any."""
         return self._load_error
 
@@ -450,10 +450,6 @@ def get_translation_model() -> TranslationModel:
     return TranslationModel()
 
 
-# Import threading at top if not already there
-import threading
-
-
 # ── Convenience translation wrappers ──────────────────────────────────────
 
 
@@ -511,9 +507,6 @@ class ChatEngine(Protocol):
 
 # ── Language detection ─────────────────────────────────────────────────────
 
-_TAMIL_RANGE = ("\u0B80", "\u0BFF")
-_DEVANAGARI_RANGE = ("\u0900", "\u097F")
-
 #: Common romanised-Tamil (Tanglish) words used by the detection heuristic.
 _TANGLISH_HINTS = frozenset(
     {
@@ -551,7 +544,7 @@ _TAMIL_TO_LATIN = {
     "அ": "a", "ஆ": "aa", "இ": "i", "ஈ": "ii", "உ": "u", "ஊ": "uu",
     "எ": "e", "ஏ": "ee", "ஐ": "ai", "ஒ": "o", "ஓ": "oo", "ஔ": "au",
     "க": "ka", "ங": "nga", "ச": "cha", "ஜ": "ja", "ஞ": "nya",
-    "ட": "ta", "ண": "na", "த": "tha", "ந": "na", "ன": "na",
+    "ட": "ta", "ண": "na", "த": "tha", "ந": "na",
     "ப": "pa", "ம": "ma", "ய": "ya", "ர": "ra", "ல": "la",
     "வ": "va", "ழ": "zha", "ள": "la", "ற": "ra", "ன": "na",
     "ஷ": "sha", "ஸ": "sa", "ஹ": "ha", "க்ஷ": "ksha",
@@ -589,38 +582,6 @@ _DEVANAGARI_TO_LATIN = {
 
 #: Latin to Devanagari transliteration map (reverse)
 _LATIN_TO_DEVANAGARI = {v: k for k, v in _DEVANAGARI_TO_LATIN.items() if v}
-
-
-# ── Compatibility helpers ────────────────────────────────────────────────
-
-class _LangCode(str):
-    """A language code that compares equal to any of its aliases."""
-
-    def __new__(cls, code: str, variants=None):
-        obj = super().__new__(cls, code)
-        obj._variants = set(variants or {code})
-        obj._variants.add(code)
-        return obj
-
-    def __eq__(self, other):
-        if isinstance(other, str):
-            return other in self._variants or other == str(self)
-        return super().__eq__(other)
-
-    def __hash__(self):
-        return str.__hash__(self)
-
-
-class _Detected(dict):
-    """Dict subclass that compares equal to its primary code's aliases."""
-
-    def __eq__(self, other):
-        if isinstance(other, str):
-            primary = self.get("primary")
-            if isinstance(primary, _LangCode):
-                return other in primary._variants
-            return other == primary
-        return super().__eq__(other)
 
 
 # ── Translation core (LOCAL engine only) ─────────────────────────────────
@@ -1027,13 +988,6 @@ def transliterate(
     return text
 
 
-def _resolve_engine(engine: Any | None) -> Any:
-    if engine is not None:
-        return engine
-    from ..engine.bridge import bridge
-    return bridge
-
-
 # ── Pronunciation guidance ───────────────────────────────────────────────
 
 
@@ -1101,33 +1055,21 @@ def tanglish_to_english(tanglish: str) -> str:
         "vanakam": "hello",
         "namaskaram": "greetings",
         "sari": "yes",
-        "illa": "no",
         "ille": "no",
         "seri": "okay",
         "sollunga": "please say",
-        "sollu": "say",
         "sonna": "said / told",
 
         # Questions
-        "enna": "what",
         "epdi": "how",
-        "eppadi": "how",
-        "engay": "where",
-        "eppov": "when",
         "eppovil": "when",
-        "yaaru": "who",
         "yaar": "who",
-        "en": "why",
         "yena": "why",
-        "evlo": "how much",
-        "evvalavu": "how much",
         "evlo perum": "how big",
         "evlo sinna": "how small",
 
         # Verbs - common
-        "irukku": "is",
         "irukkingu": "are",
-        "irundhu": "was",
         "irundhichu": "had been",
         "varan": "comes",
         "varraan": "will come",
@@ -1143,7 +1085,6 @@ def tanglish_to_english(tanglish: str) -> str:
         "kudichu": "drank",
         "kudikka": "to drink",
         "nillu": "stand",
-        "nillunga": "please stand",
         "ukkaru": "sit",
         "ukkarunga": "please sit",
         "urangu": "sleep",
@@ -1156,7 +1097,6 @@ def tanglish_to_english(tanglish: str) -> str:
         "odinen": "ran",
         "paaru": "look / see",
         "paathu": "looked",
-        "paathukonga": "take care",
         "kettu": "listen / ask",
         "ketten": "asked",
         "kettunga": "please listen",
@@ -1204,7 +1144,6 @@ def tanglish_to_english(tanglish: str) -> str:
         "palaiya": "old",
         "nalla per": "good name",
         "pudhu puthu": "brand new",
-        "arisi": "raw rice",
         "satham": "cooked rice",
 
         # Family & Relations
@@ -1235,20 +1174,14 @@ def tanglish_to_english(tanglish: str) -> str:
 
         # People
         "naan": "I",
-        "naama": "we (incl.)",
-        "naanga": "we (excl.)",
         "nee": "you (sg.)",
-        "neenga": "you (pl.)",
         "avan": "he",
         "ava": "she",
         "avaru": "they / he/she (respect)",
-        "avanga": "they (pl.)",
         "ivan": "this man",
         "ival": "this woman",
         "uvan": "that man",
         "uval": "that woman",
-        "yaaru": "who",
-        "aar": "who (pl.)",
 
         # Pronouns & Possessives
         "enakku": "to me / for me",
@@ -1291,8 +1224,6 @@ def tanglish_to_english(tanglish: str) -> str:
         "nerama": "on time",
         "neram illa": "no time",
         "mudichiruchu": "finished",
-        "mudiyala": "cannot finish",
-        "mudiyum": "can finish",
 
         # Places
         "inge": "here",
@@ -1383,7 +1314,6 @@ def tanglish_to_english(tanglish: str) -> str:
         "kacchai": "underwear",
         "kuttichi": "shoes",
         "sandal": "sandals",
-        "mookuthi": "nose ring",
         "kadukkan": "earring",
         "valayal": "bangle",
         "mothiram": "ring",
@@ -1407,7 +1337,6 @@ def tanglish_to_english(tanglish: str) -> str:
         "manusu": "stomach / heart",
         "udal": "body",
         "udal nalam": "health",
-        "kuttam": "fault / disease",
 
         # Actions - daily
         "vandhu vanthu": "came and came (repeatedly)",
@@ -1606,18 +1535,9 @@ def english_to_tanglish(english: str) -> str:
         "ok": "seri",
         "please say": "sollunga",
         "say": "sollu",
-        "tell": "sonna",
         "said": "sonna",
-        "told": "sonna",
 
         # Questions
-        "what": "enna",
-        "how": "epdi",
-        "where": "engay",
-        "when": "eppov",
-        "who": "yaaru",
-        "why": "yen",
-        "how much": "evlo",
         "how many": "evlo",
         "how big": "evlo perum",
         "how small": "evlo sinna",
@@ -1627,11 +1547,9 @@ def english_to_tanglish(english: str) -> str:
         "are": "irukkingu",
         "was": "irundhu",
         "were": "irundhu",
-        "come": "vaa",
         "comes": "varan",
         "came": "vandhu",
         "will come": "varraan",
-        "go": "po",
         "goes": "poganum",
         "went": "poitu",
         "will go": "pogalam",
@@ -1644,10 +1562,8 @@ def english_to_tanglish(english: str) -> str:
         "drinks": "kudikka",
         "drank": "kudichu",
         "will drink": "kudippen",
-        "stand": "nillu",
         "stands": "nillu",
         "stood": "nillu",
-        "sit": "ukkaru",
         "sits": "ukkaru",
         "sat": "ukkaru",
         "sleep": "urangu",
@@ -1745,7 +1661,6 @@ def english_to_tanglish(english: str) -> str:
         "we": "naanga",
         "we (including you)": "naama",
         "you": "nee",
-        "you (plural)": "neenga",
         "he": "avan",
         "she": "ava",
         "they": "avanga",
@@ -1754,7 +1669,6 @@ def english_to_tanglish(english: str) -> str:
         "this woman": "ival",
         "that man": "uvan",
         "that woman": "uval",
-        "who": "yaaru",
 
         # Possessives
         "my": "en",
@@ -1793,14 +1707,12 @@ def english_to_tanglish(english: str) -> str:
         "like that": "appadi",
         "on time": "nerama",
         "no time": "neram illa",
-        "finished": "mudichiruchu",
         "cannot finish": "mudiyala",
         "can finish": "mudiyum",
 
         # Places
         "here": "inge",
         "there": "ange",
-        "where": "engay",
         "house": "veedu",
         "home": "viidu",
         "town": "ooru",
@@ -2043,8 +1955,6 @@ def english_to_tanglish(english: str) -> str:
         "why": "yen",
         "how much": "evlo",
         "what name": "enna per",
-        "my name": "en per",
-        "your name": "un per",
         "his name": "avan per",
         "her name": "aval per",
         "my name": "ennoda per",
@@ -2086,19 +1996,3 @@ def english_to_tanglish(english: str) -> str:
     }
 
     return _apply_word_map(english, mapping)
-
-
-# ── Config helper (settings.yaml) ────────────────────────────────────────
-
-def get_language_settings() -> dict:
-    """Return the language-related section of settings.yaml."""
-    try:
-        settings = load_settings()
-    except Exception:
-        return {}
-    if not isinstance(settings, dict):
-        return {}
-    return {
-        "language": settings.get("language"),
-        "features": (settings.get("features") or {}).get("language_intelligence"),
-    }

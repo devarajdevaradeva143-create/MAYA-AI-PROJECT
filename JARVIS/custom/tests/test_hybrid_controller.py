@@ -2,7 +2,6 @@
 
 import sys
 import os
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -125,8 +124,8 @@ def test_cancel_task():
 def test_cancel_all_ai():
     hc = HybridController(sleep_fn=lambda x: None)
     hc.acquire(Controller.AI)
-    t1 = hc.queue_task("a")
-    t2 = hc.queue_task("b")
+    hc.queue_task("a")
+    hc.queue_task("b")
     hc.next_task()
     n = hc.cancel_all_ai()
     assert n >= 1
@@ -212,7 +211,7 @@ def test_reset():
 def test_next_task_blocked_when_paused():
     hc = HybridController(sleep_fn=lambda x: None)
     hc.acquire(Controller.AI)
-    tid = hc.queue_task("job")
+    hc.queue_task("job")
     hc.cancel_all_ai()  # pauses AI
     hc.acquire(Controller.AI)  # re-acquire? paused flag still true from cancel_all
     # paused blocks next_task even if controller is AI

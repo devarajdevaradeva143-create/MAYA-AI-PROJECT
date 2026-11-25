@@ -17,7 +17,6 @@ import array
 import ctypes
 import os
 import time
-from ctypes import wintypes
 from typing import Callable
 
 from .voice_stt import (

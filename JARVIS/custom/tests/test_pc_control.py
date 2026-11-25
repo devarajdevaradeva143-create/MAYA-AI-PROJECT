@@ -7,12 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom.tools.pc_control import (
     list_apps,
-    open_app,
-    close_app,
     read_file,
-    edit_file,
-    delete_file,
-    run_command,
     is_app_running,
 )
 

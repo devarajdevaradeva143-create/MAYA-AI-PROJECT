@@ -1,6 +1,5 @@
 """Tests for orchestrator."""
 
-import pytest
 
 
 def test_orchestrator_simple_chat(mock_engine, mock_pc, mock_assistant, mock_knowledge):

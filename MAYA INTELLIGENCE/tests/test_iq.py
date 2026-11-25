@@ -1,6 +1,5 @@
 """Tests for IQ engine."""
 
-import pytest
 
 
 def test_iq_answer(mock_engine, mock_knowledge):
@@ -64,7 +63,7 @@ def test_iq_with_eq_directive(mock_engine, mock_knowledge):
     from maya_intelligence.engines import IQEngine
 
     iq = IQEngine(mock_engine, mock_knowledge, "Test persona")
-    result = iq.answer("Hello", eq_directive="Be supportive")
+    iq.answer("Hello", eq_directive="Be supportive")
 
     # Check that the call was made with the directive
     call_args = mock_engine.chat.call_args
