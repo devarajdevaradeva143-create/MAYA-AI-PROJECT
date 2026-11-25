@@ -8,7 +8,7 @@
 **Owner files:**
 - Server: `JARVIS\custom\server\` (Windows + Fedora share)
 - Client: `MOBILE APP\app\src\main\java\com\devaraj\maya\data\remote\`
-- Plans: `MOBILE APP\PLAN.md`, `LAPTOP\windows\PLAN.md`
+- Plans: `MOBILE APPLICATION\PLAN.md`, `WINDOWS APPLICATION\windows\PLAN.md`
 
 ---
 

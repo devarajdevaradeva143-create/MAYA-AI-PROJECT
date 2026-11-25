@@ -3,7 +3,7 @@
 # Registers a Task Scheduler job that starts the Maya tray app at logon.
 #
 # Usage (normal PowerShell, no admin needed for current-user task):
-#   powershell -ExecutionPolicy Bypass -File "LAPTOP\windows\app\install_autostart.ps1"
+#   powershell -ExecutionPolicy Bypass -File "WINDOWS APPLICATION\windows\app\install_autostart.ps1"
 #
 # Uninstall:
 #   Unregister-ScheduledTask -TaskName "MayaAI" -Confirm:$false
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 
 $appDir = $PSScriptRoot
 $root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $appDir))
-$exe = Join-Path $root "LAPTOP\windows\dist\mayaai.exe"
+$exe = Join-Path $root "WINDOWS APPLICATION\windows\dist\mayaai.exe"
 $taskName = "MayaAI"
 
 if (-not (Test-Path $exe)) {

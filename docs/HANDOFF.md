@@ -100,10 +100,10 @@ JARVIS/custom/
 ```
 
 OS layer:
-- `LAPTOP/windows/app/maya_tray.py` — tray app (needs `pystray` + `pillow`;
+- `WINDOWS APPLICATION/windows/app/maya_tray.py` — tray app (needs `pystray` + `pillow`;
   falls back to terminal chat when missing)
-- `LAPTOP/windows/app/install_autostart.ps1` — Task Scheduler autostart
-- `LAPTOP/fedora/app/maya.service` + `install_service.sh` — systemd user unit
+- `WINDOWS APPLICATION/windows/app/install_autostart.ps1` — Task Scheduler autostart
+- `WINDOWS APPLICATION/fedora/app/maya.service` + `install_service.sh` — systemd user unit
   that runs `monitor start` (written, not yet tested on Fedora)
 - `MAYA AI/scripts/maya.ps1` / `maya.sh` — launchers (verified on Windows)
 
@@ -153,11 +153,11 @@ corrupt-store preservation, sensitive-file deny-list and `--ask-code`.
    Tamil model, so this needs a different recogniser (e.g. Whisper) — a larger
    change, not just a download.
 
-3. **Windows tray** (done in LAPTOP/windows app)
-   The PySide6 app (`LAPTOP/windows`) now has a real tray (`--tray`),
+3. **Windows tray** (done in WINDOWS APPLICATION/windows app)
+   The PySide6 app (`WINDOWS APPLICATION/windows`) now has a real tray (`--tray`),
    close-to-tray / minimize-to-tray / start-minimized settings, and a
    packaged `dist\mayaai.exe` with a desktop shortcut (`Desktop\Maya AI.lnk`).
-   `pystray` + `pillow` are dependencies of `LAPTOP/windows` (not the JARVIS
+   `pystray` + `pillow` are dependencies of `WINDOWS APPLICATION/windows` (not the JARVIS
    venv). Packaged builds resolve `MAYA AI\` from the exe folder
    (`app/paths.py` + `custom/config.py` via `MAYA_AI_HOME`), never from the
    PyInstaller temp directory.
@@ -173,7 +173,7 @@ corrupt-store preservation, sensitive-file deny-list and `--ask-code`.
 
 6. **Cleanup (ask the user first)**
    Legacy duplicates: `MAYA AI/scripts/maya-launch.ps1`, `maya-launch.sh`,
-   `LAPTOP/windows/app/autostart.ps1`. Old embedding cache
+   `WINDOWS APPLICATION/windows/app/autostart.ps1`. Old embedding cache
    `MAYA AI/Model/hf/hub/models--minishlab--potion-base-8M` (~29 MB).
    Delete only with permission.
 

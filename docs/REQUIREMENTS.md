@@ -102,7 +102,7 @@ One MAYA AI controlling both Windows and Fedora, three apps (Windows/Fedora/Andr
 | Security | Done | Not started | Partial |
 | Dual-boot awareness | Partial | Not started | Partial |
 
-Windows app reference: `LAPTOP/windows/README.md` (build complete, tests pass).  
-Fedora app reference: `LAPTOP/fedora/README.md` (placeholder).  
+Windows app reference: `WINDOWS APPLICATION/windows/README.md` (build complete, tests pass).  
+Fedora app reference: `WINDOWS APPLICATION/fedora/README.md` (placeholder).  
 Android app reference: `MOBILE APP/README.md` (build complete, phases 0-12).
 path: C:\Users\devar\Desktop\MAYA AI PROJECT\docs\REQUIREMENTS.md

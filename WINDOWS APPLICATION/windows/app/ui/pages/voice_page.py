@@ -20,6 +20,14 @@ from PySide6.QtWidgets import (
 from app.services.chat_service import ChatService
 from app.services.voice_service import VoiceAdapter, VoiceError
 from app.services.wake_service import WakeAdapter
+from app.settings_repository import SettingsRepository
+
+_ENGINE_LABELS = (
+    ("Auto (best)", "auto"),
+    ("Kuyil — fast, Tanglish OK", "kuyil"),
+    ("Piper — natural, Tamil only", "piper"),
+    ("Windows SAPI", "sapi"),
+)
 
 
 class VoicePage(QWidget):
@@ -28,10 +36,13 @@ class VoicePage(QWidget):
     transcript_added = Signal(str, str)  # role, text
 
     def __init__(self, voice: VoiceAdapter | None = None, wake: WakeAdapter | None = None,
-                 chat: ChatService | None = None, parent: QWidget | None = None) -> None:
+                 chat: ChatService | None = None, parent: QWidget | None = None,
+                 repository: SettingsRepository | None = None) -> None:
         super().__init__(parent)
         self._voice = voice or VoiceAdapter()
         self._wake = wake or WakeAdapter()
+        self._repository = repository
+        self._engine = self._read_engine()
 
         # Transcript log (last 10 entries, local only)
         self._transcripts: deque[tuple[str, str]] = deque(maxlen=10)
@@ -75,6 +86,15 @@ class VoicePage(QWidget):
         self._orb_button.setCheckable(True)
         self._orb_button.clicked.connect(self._on_orb_toggle)
 
+        # TTS engine selector (Kuyil / Piper / SAPI)
+        self._engine_combo = QComboBox()
+        for label, value in _ENGINE_LABELS:
+            self._engine_combo.addItem(label, value)
+        index = self._engine_combo.findData(self._engine)
+        self._engine_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._engine_combo.setFixedWidth(210)
+        self._engine_combo.currentIndexChanged.connect(self._on_engine_change)
+
         # TTS test button
         self._tts_button = QPushButton("TTS Test")
         self._tts_button.setFixedSize(96, 32)
@@ -82,6 +102,8 @@ class VoicePage(QWidget):
 
         top.addWidget(QLabel("Language:"))
         top.addWidget(self._lang_combo)
+        top.addWidget(QLabel("Voice:"))
+        top.addWidget(self._engine_combo)
         top.addStretch(1)
         top.addWidget(self._orb_button)
         top.addWidget(self._tts_button)
@@ -157,14 +179,33 @@ class VoicePage(QWidget):
             note = "English" if lang != "ta" else "Tamil"
         self._wake_label.setText(f"Wake: clap enabled, STT {note}")
 
+    def _read_engine(self) -> str:
+        if self._repository is None:
+            return "auto"
+        try:
+            value = str(self._repository.get("voice.tts.engine", "auto") or "auto")
+        except Exception:
+            return "auto"
+        return value if value in {"auto", "kuyil", "piper", "sapi"} else "auto"
+
+    def _on_engine_change(self, index: int) -> None:
+        value = str(self._engine_combo.currentData() or "auto")
+        self._engine = value
+        if self._repository is None:
+            return
+        try:
+            self._repository.update({"voice.tts.engine": value})
+        except Exception as exc:  # noqa: BLE001 - show, never crash the page
+            self.transcript_added.emit("system", f"Could not save voice engine: {exc}")
+
     def _on_tts_test(self) -> None:
         try:
             if getattr(self, "_selected_lang", "en") == "ta":
-                text = "வணக்கம், நான் மாயா. இது ஒரு தமிழ் குரல் சோதனை."
-                self._voice.speak(text, lang="tamil")
+                text = "வணக்கம், நான் மாயா. இன்னைக்கு என்ன help வேணும்?"
+                self._voice.speak(text, lang="tamil", engine=self._engine)
             else:
                 text = "Vanakkam da! Enna aachu? Konjam rest eduthukko."
-                self._voice.speak(text, lang="english")
+                self._voice.speak(text, lang="english", engine=self._engine)
             self.transcript_added.emit("assistant", text)
         except VoiceError as e:
             self.transcript_added.emit("system", f"TTS error: {e}")

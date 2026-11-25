@@ -61,7 +61,7 @@ MAYA AI PROJECT\
 │  ├─ memory\             ← offline + online memory
 │  ├─ logs\               ← records
 │  └─ scripts\            ← launchers
-├─ LAPTOP\
+├─ WINDOWS APPLICATION\
 │  ├─ windows\            ← Windows app
 │  └─ fedora\             ← Fedora app
 ├─ DEVARAJ\               ← un details + chat history
@@ -346,7 +346,7 @@ Ithu 3 files-ah vera AI coder (Claude / Codex / Gemini / OpenCode) follow pannum
 | Enna | File |
 |---|---|
 | 📱 Mobile app (Android) | `MOBILE APP\PLAN.md` |
-| 💻 Windows app + phone server | `LAPTOP\windows\PLAN.md` |
+| 💻 Windows app + phone server | `WINDOWS APPLICATION\windows\PLAN.md` |
 | 🔗 Phone ↔ laptop API | `docs\API-CONTRACT.md` |
 
 **Rules:**

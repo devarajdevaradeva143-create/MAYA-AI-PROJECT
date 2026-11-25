@@ -1,4 +1,4 @@
-# LAPTOP
+# WINDOWS APPLICATION
 
 Maya AI laptop app — Windows + Fedora.
 

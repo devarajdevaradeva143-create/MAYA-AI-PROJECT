@@ -1295,12 +1295,19 @@ def voice() -> None:
 @voice.command(name="speak")
 @click.argument("text")
 @click.option("--lang", default="english", help="Language: english or tamil")
-def voice_speak(text: str, lang: str) -> None:
+@click.option(
+    "--engine",
+    default=None,
+    type=click.Choice(["auto", "kuyil", "piper", "sapi"]),
+    help="TTS engine (default: voice.tts.engine in settings.yaml)",
+)
+def voice_speak(text: str, lang: str, engine: str | None) -> None:
     """Speak text using local TTS.
 
     Usage: maya voice speak "Hello" --lang english
+           maya voice speak "Vanakkam da" --lang tamil --engine kuyil
     """
-    _echo(speak(text, lang))
+    _echo(speak(text, lang, engine))
 
 
 @voice.command(name="listen")

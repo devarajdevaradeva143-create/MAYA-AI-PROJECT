@@ -6,14 +6,33 @@
 
 | Feature | Status | Engine |
 |---|---|---|
-| English TTS (speak) | ✅ works | Windows SAPI |
-| Tamil TTS | ❌ needs model | Piper `.onnx` (see below) |
+| English TTS (speak) | ✅ works | Piper `en_US-amy` (fallback: Windows SAPI) |
+| Tamil TTS | ✅ works | Piper `ta_IN-rasa_female` **or** Kuyil |
+| Tanglish TTS (Tamil + English words) | ✅ works | Kuyil `kuyil-20m` |
 | English STT (file) | ✅ works | Vosk `vosk-en` |
 | Indian English STT | ✅ works | Vosk `vosk-en-in` |
 | Tamil STT | ❌ not supported | official Vosk has no Tamil model |
 | Mic recording (STT) | ✅ works | Windows `waveIn` |
 | 3-clap wake detection | ✅ logic verified | pure Python + `waveIn` |
 | Wake phrase ("maya maya maya") | ✅ text check | `check_wake()` |
+
+## TTS engines — user-ku option
+
+`voice.tts.engine` (or the **Voice** dropdown on the Voice page):
+
+| Value | Enna aagum |
+|---|---|
+| `auto` | Tamil → Kuyil (illena Piper), English → Piper (illena SAPI) |
+| `kuyil` | Tiny offline voice. Tamil + English words correct-a pesum (Tanglish-ku best) |
+| `piper` | Natural voice, aana Tamil text-la English word vandha thapp-a ucharikkum |
+| `sapi` | Windows built-in voices only |
+
+CLI-la force panna:
+
+```powershell
+python -m custom.cli voice speak "Vanakkam da, enna pandra?" --lang tamil --engine kuyil
+python -m custom.cli voice speak "Vanakkam" --lang tamil --engine piper
+```
 
 ## Commands
 
@@ -39,7 +58,13 @@ Everything is inside the project — nothing is downloaded at runtime:
 MAYA AI/Model/models/
 ├─ vosk-en/        English (US) small      (~40 MB)
 ├─ vosk-en-in/     Indian English small    (~80 MB)
-└─ vosk-ta/        not available officially (Maya reports this honestly)
+├─ vosk-ta/        not available officially (Maya reports this honestly)
+└─ kuyil-20m/      Kuyil TTS — Tamil + Tanglish (86 MB, CC BY 4.0)
+
+MAYA AI/voice/
+├─ tamil/ta_IN-rasa_female-medium.onnx                active Piper Tamil voice
+├─ tamil/candidates/ta_IN-ValluvarNeural-medium.onnx  spare Piper voice
+└─ english/en_US-amy-medium.onnx                      active Piper English voice
 ```
 
 Paths come from `MAYA AI/config/settings.yaml`:

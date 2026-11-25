@@ -1,17 +1,17 @@
 # Windows App — Completion Plan (handoff)
 
-> Vera AI coder ithai padichu **`LAPTOP\windows\`** mattum complete pannanum.
+> Vera AI coder ithai padichu **`WINDOWS APPLICATION\windows\`** mattum complete pannanum.
 > Ithu plan mattum — code ippo maathala. Ovvoru phase-um DoD pass aana pinne
 > adutha phase.
 >
-> Verified on: 18 Nov 2026 · `LAPTOP\windows` → **161 tests pass**, `dist\mayaai.exe` built.
+> Verified on: 18 Nov 2026 · `WINDOWS APPLICATION\windows` → **161 tests pass**, `dist\mayaai.exe` built.
 
 ---
 
 ## 0. Rules (break panna koodadhu)
 
 1. `JARVIS\OpenJarvis\` **read-only** ❌ — final-la `git -C JARVIS/OpenJarvis status --porcelain` empty-a irukkanum.
-2. Namma code `JARVIS\custom\` + `LAPTOP\windows\` mattum ✅
+2. Namma code `JARVIS\custom\` + `WINDOWS APPLICATION\windows\` mattum ✅
 3. Config = `MAYA AI\config\settings.yaml` — code-la hardcode pannaadhu.
 4. Secrets `.env`-la mattum; commit pannaadhu.
 5. Destructive / important action → permission prompt ⚠️ (ippo irukkura ConfirmDialog break pannaadhu).
@@ -25,16 +25,16 @@
 | Item | Path / Value |
 |---|---|
 | Project root | `C:\Users\devar\Desktop\MAYA AI PROJECT` |
-| App | `LAPTOP\windows\` |
-| Python venv (app) | `LAPTOP\windows\.venv` — **ithula dhaan** `pystray`, `PySide6`, `Pillow` irukku |
-| Test command | `cd "LAPTOP\windows"; .\.venv\Scripts\python.exe -m pytest -q` |
+| App | `WINDOWS APPLICATION\windows\` |
+| Python venv (app) | `WINDOWS APPLICATION\windows\.venv` — **ithula dhaan** `pystray`, `PySide6`, `Pillow` irukku |
+| Test command | `cd "WINDOWS APPLICATION\windows"; .\.venv\Scripts\python.exe -m pytest -q` |
 | Lint | `.\\.venv\\Scripts\\ruff.exe check app tests` |
 | Build | `.\\.venv\\Scripts\\python.exe -m PyInstaller mayaai.spec --noconfirm` → `dist\mayaai.exe` |
 | Settings | `MAYA AI\config\settings.yaml` |
 | Security store | `MAYA AI\memory\offline\security.json` (PBKDF2, salt; **plaintext illa**) |
 | Logs | `MAYA AI\logs\` |
 
-**Note:** `JARVIS\.venv`-la `pystray` **illa**. Tray-related code test panna `LAPTOP\windows\.venv` use pannu.
+**Note:** `JARVIS\.venv`-la `pystray` **illa**. Tray-related code test panna `WINDOWS APPLICATION\windows\.venv` use pannu.
 
 ---
 
@@ -59,7 +59,7 @@
 | `close_to_tray` / `minimize_to_tray` / `start_minimized` | Settings-la save aagum, but `closeEvent`/`changeEvent` illa |
 | Phone server GUI control illa | `ServerService` irukku, but `--headless` mattum use aagudhu |
 | Tests gap | `test_ui_shell.py` navigation mattum check pannudhu; page type illa |
-| Docs stale | `LAPTOP\windows\README.md` = "build innum start pannala" |
+| Docs stale | `WINDOWS APPLICATION\windows\README.md` = "build innum start pannala" |
 
 ### Verified line-level bugs (fix pannu)
 | File | Line | Bug |
@@ -78,31 +78,31 @@
 
 ### Modify
 ```
-LAPTOP\windows\app\main.py
-LAPTOP\windows\app\ui\main_window.py
-LAPTOP\windows\app\ui\pages\monitor_page.py
-LAPTOP\windows\app\ui\pages\teacher_page.py
-LAPTOP\windows\app\ui\pages\security_page.py   (full rewrite)
-LAPTOP\windows\app\ui\pages\settings_page.py   (server card)
-LAPTOP\windows\app\ui\pages\pc_page.py         (dead branch)
+WINDOWS APPLICATION\windows\app\main.py
+WINDOWS APPLICATION\windows\app\ui\main_window.py
+WINDOWS APPLICATION\windows\app\ui\pages\monitor_page.py
+WINDOWS APPLICATION\windows\app\ui\pages\teacher_page.py
+WINDOWS APPLICATION\windows\app\ui\pages\security_page.py   (full rewrite)
+WINDOWS APPLICATION\windows\app\ui\pages\settings_page.py   (server card)
+WINDOWS APPLICATION\windows\app\ui\pages\pc_page.py         (dead branch)
 ```
 
 ### Create
 ```
-LAPTOP\windows\app\services\security_service.py
-LAPTOP\windows\app\ui\lock_screen.py
-LAPTOP\windows\tests\test_pages_wired.py
-LAPTOP\windows\tests\test_monitor_page.py
-LAPTOP\windows\tests\test_teacher_page.py
-LAPTOP\windows\tests\test_security_service.py
-LAPTOP\windows\tests\test_lock_screen.py
-LAPTOP\windows\tests\test_settings_server.py   (optional)
+WINDOWS APPLICATION\windows\app\services\security_service.py
+WINDOWS APPLICATION\windows\app\ui\lock_screen.py
+WINDOWS APPLICATION\windows\tests\test_pages_wired.py
+WINDOWS APPLICATION\windows\tests\test_monitor_page.py
+WINDOWS APPLICATION\windows\tests\test_teacher_page.py
+WINDOWS APPLICATION\windows\tests\test_security_service.py
+WINDOWS APPLICATION\windows\tests\test_lock_screen.py
+WINDOWS APPLICATION\windows\tests\test_settings_server.py   (optional)
 ```
 
 ### Docs
 ```
-LAPTOP\windows\README.md
-LAPTOP\windows\PLAN.md
+WINDOWS APPLICATION\windows\README.md
+WINDOWS APPLICATION\windows\PLAN.md
 docs\HANDOFF.md
 docs\ROADMAP.md
 docs\WINDOWS-APP.md   (new)
@@ -396,7 +396,7 @@ def changeEvent(self, event):
 - `run_gui(start_hidden=HAS_PYSTRAY and start_minimized)`
 - `MayaMainWindow(..., tray_available=HAS_PYSTRAY)`
 
-**Note:** `pystray` `LAPTOP\windows\.venv`-la dhaan. `pyproject.toml`-la `pystray==0.19.5` already irukku.
+**Note:** `pystray` `WINDOWS APPLICATION\windows\.venv`-la dhaan. `pyproject.toml`-la `pystray==0.19.5` already irukku.
 
 **DoD**
 - `close_to_tray=True` → close = hide, app running
@@ -470,7 +470,7 @@ ServerService(services=None)   # default build_services()
 
 **Verify**
 ```powershell
-cd "LAPTOP\windows"
+cd "WINDOWS APPLICATION\windows"
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\ruff.exe check app tests
 ```
@@ -482,8 +482,8 @@ Expected: **161 + new all pass**, ruff clean.
 
 | File | Change |
 |---|---|
-| `LAPTOP\windows\README.md` | "build innum start pannala" remove; real status, pages, run commands, tray/server notes |
-| `LAPTOP\windows\PLAN.md` | Phase 6/7/8/10 status honest-a; remove "All 13 phases" overclaim |
+| `WINDOWS APPLICATION\windows\README.md` | "build innum start pannala" remove; real status, pages, run commands, tray/server notes |
+| `WINDOWS APPLICATION\windows\PLAN.md` | Phase 6/7/8/10 status honest-a; remove "All 13 phases" overclaim |
 | `docs\HANDOFF.md` | "Mobile app — not started" remove; Windows app pending list update |
 | `docs\ROADMAP.md` | Mobile + Windows app section add |
 | `docs\WINDOWS-APP.md` (new) | Features, security model (PIN hashed, no plaintext), server setup, tray, troubleshooting |
@@ -493,7 +493,7 @@ Expected: **161 + new all pass**, ruff clean.
 ## Phase W9 — Build + smoke test (20 min)
 
 ```powershell
-cd "LAPTOP\windows"
+cd "WINDOWS APPLICATION\windows"
 .\.venv\Scripts\python.exe -m PyInstaller mayaai.spec --noconfirm
 # → dist\mayaai.exe
 ```
@@ -521,7 +521,7 @@ cd "LAPTOP\windows"
 3. **QLineEdit API** — `setPlaceholderText()`, `.text()`. `setPlaceholderType()` / `toPlainText()` **illa**.
 4. **`self._attempts`** — SecurityPage-la initialize pannala; `__init__`-la `self._attempts = 0`.
 5. **Notify** — `pc_page._on_run()` already params collect + execute pannudhu. `_execute_after_confirm()`-la irukkura "Not implemented" branch dead code → delete pannu (or route params).
-6. **pystray** — `LAPTOP\windows\.venv`-la mattum; `JARVIS\.venv`-la illa.
+6. **pystray** — `WINDOWS APPLICATION\windows\.venv`-la mattum; `JARVIS\.venv`-la illa.
 7. **Tests isolation** — `MAYA_SECURITY_STORE` env temp path-ku set pannu. Real `MAYA AI\memory\offline\security.json` touch pannaadhu.
 8. **Monitor WMI** — `snapshot()` UI thread-la slow aagalam; QThread use pannu (optional).
 9. **OpenJarvis** — final check `git -C JARVIS/OpenJarvis status --porcelain` empty.
@@ -554,7 +554,7 @@ cd "LAPTOP\windows"
 1. Read `AGENTS.md`, `JARVIS\AGENTS.md`, this file.
 2. Run:
    ```powershell
-   cd "LAPTOP\windows"
+   cd "WINDOWS APPLICATION\windows"
    .\.venv\Scripts\python.exe -m pytest -q
    ```
    Expected: 161 passed.

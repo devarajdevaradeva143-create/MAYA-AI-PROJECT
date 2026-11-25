@@ -1,6 +1,6 @@
 # Maya AI — Windows Desktop App
 
-Local-first PySide6 desktop app in `LAPTOP\windows\`.
+Local-first PySide6 desktop app in `WINDOWS APPLICATION\windows\`.
 
 ## Features
 
@@ -19,7 +19,7 @@ Local-first PySide6 desktop app in `LAPTOP\windows\`.
 ## Run
 
 ```powershell
-cd "LAPTOP\windows"
+cd "WINDOWS APPLICATION\windows"
 .\.venv\Scripts\python.exe -m app            # GUI
 .\.venv\Scripts\python.exe -m app --tray     # start in tray
 .\.venv\Scripts\python.exe -m app --headless # phone server only
@@ -41,7 +41,7 @@ cd "LAPTOP\windows"
 
 ### Desktop shortcut
 
-`C:\Users\devar\Desktop\Maya AI.lnk` → `LAPTOP\windows\dist\mayaai.exe`
+`C:\Users\devar\Desktop\Maya AI.lnk` → `WINDOWS APPLICATION\windows\dist\mayaai.exe`
 (working dir `dist`, icon from the exe).
 
 ### How the exe finds `MAYA AI\`
@@ -52,8 +52,8 @@ mirrored in `JARVIS\custom\config.py`:
 
 1. `MAYA_AI_HOME` (validated against `config\settings.yaml`)
 2. `MAYA AI\` beside the exe, then at each parent folder up to 5 levels
-   (`dist\` → `windows\` → `LAPTOP\` → project root)
-3. dev fallback: `LAPTOP\windows\..\..\MAYA AI`
+   (`dist\` → `windows\` → `WINDOWS APPLICATION\` → project root)
+3. dev fallback: `WINDOWS APPLICATION\windows\..\..\MAYA AI`
 
 At startup the app publishes the resolved folder as `MAYA_AI_HOME` so
 `JARVIS\custom` (config, memory, voice, security) uses the same one.
@@ -68,6 +68,6 @@ At startup the app publishes the resolved folder as `MAYA_AI_HOME` so
 
 ## Notes
 
-- `pystray` + `pillow` are dependencies of `LAPTOP\windows` (not the JARVIS venv).
+- `pystray` + `pillow` are dependencies of `WINDOWS APPLICATION\windows` (not the JARVIS venv).
 - `JARVIS\OpenJarvis\` is read-only.
 - Detailed completion plan: `docs\WINDOWS-APP-COMPLETION-PLAN.md`.

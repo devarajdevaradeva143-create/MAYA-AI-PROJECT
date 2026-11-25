@@ -154,7 +154,14 @@ security:
 # voice — ellame offline (Piper / Windows SAPI / Vosk)
 voice:
   tts:
-    engine: auto            # auto | piper | sapi
+    engine: auto            # auto | kuyil | piper | sapi
+                            #   auto  -> Tamil: kuyil (fallback piper), English: piper (fallback sapi)
+                            #   kuyil -> tiny offline voice, best for Tanglish (Tamil + English words)
+                            #   piper -> natural Tamil/English, but mis-reads English words in Tamil text
+                            #   sapi  -> Windows built-in voices only
+    kuyil:
+      model: MAYA AI/Model/models/kuyil-20m
+      voice: female         # female | male
     preferred_voices:       # Windows SAPI names, first match wins
     - heera
     - neerja

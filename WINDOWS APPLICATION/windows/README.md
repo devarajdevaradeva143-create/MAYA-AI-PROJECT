@@ -10,7 +10,7 @@ Maya AI desktop app for Windows (PySide6, Python 3.13).
 ## Full plan
 
 ```
-LAPTOP\windows\PLAN.md
+WINDOWS APPLICATION\windows\PLAN.md
 ```
 
 ## Shared API
@@ -48,7 +48,7 @@ shortcut works without setting any environment variable. See
 ### Run
 
 ```powershell
-cd "LAPTOP\windows"
+cd "WINDOWS APPLICATION\windows"
 .\.venv\Scripts\python.exe -m app            # GUI
 .\.venv\Scripts\python.exe -m app --tray     # start in tray
 .\.venv\Scripts\python.exe -m app --headless # phone server only

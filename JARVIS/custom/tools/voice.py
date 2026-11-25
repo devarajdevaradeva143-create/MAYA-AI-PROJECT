@@ -30,6 +30,8 @@ except ImportError:  # pragma: no cover - optional
     WhisperModel = None  # type: ignore[assignment,misc]
     HAS_WHISPER = False
 
+from .kuyil_tts import KuyilTTS
+
 
 # ── Voice directories ──────────────────────────────────────────────────────
 
@@ -223,12 +225,52 @@ class PiperTTS:
 # Module-level TTS instances (english default, tamil available).
 tts_english = PiperTTS("english")
 tts_tamil = PiperTTS("tamil")
+tts_kuyil = KuyilTTS("tamil")
+
+TTS_ENGINES = ("auto", "kuyil", "piper", "sapi")
 
 
-def speak(text: str, lang: str = "english") -> str:
+def _tts_engine_cfg() -> str:
+    voice = _settings().get("voice", {})
+    tts = voice.get("tts", {}) if isinstance(voice, dict) else {}
+    value = str(tts.get("engine", "auto") or "auto").lower().strip()
+    return value if value in TTS_ENGINES else "auto"
+
+
+def tts_for(lang: str = "english", engine: Optional[str] = None) -> Optional[PiperTTS | KuyilTTS]:
+    """Pick the TTS backend. ``None`` means the Windows SAPI fallback.
+
+    - ``kuyil``: tiny offline voice, reads Tamil + English words (best for Tanglish)
+    - ``piper``: natural Tamil/English, but Tamil voices mis-read English words
+    - ``sapi``:  Windows built-in voices only
+    - ``auto``:  Tamil -> Kuyil when installed, else Piper; English -> Piper, else SAPI
+    """
+    choice = (engine or _tts_engine_cfg() or "auto").lower().strip()
+    if choice not in TTS_ENGINES:
+        choice = "auto"
+    tamil = str(lang).lower().startswith("t")
+
+    if choice == "kuyil":
+        return tts_kuyil
+    if choice == "piper":
+        return tts_tamil if tamil else tts_english
+    if choice == "sapi":
+        return None
+    if tamil:
+        return tts_kuyil if tts_kuyil.is_available() else tts_tamil
+    return tts_english if tts_english.is_available() else None
+
+
+def speak(text: str, lang: str = "english", engine: Optional[str] = None) -> str:
     """Speak text using the appropriate TTS engine."""
-    tts = tts_tamil if str(lang).lower().startswith("t") else tts_english
+    tts = tts_for(lang, engine)
+    if tts is None:
+        return _speak_windows_sapi(text)
+    if not tts.is_available():
+        name = "Kuyil" if isinstance(tts, KuyilTTS) else "Piper"
+        return f"[TTS] {name} is not available. Install the model or pick another engine."
     return tts.speak(text)
+
 
 
 # ── STT (faster-whisper) ──────────────────────────────────────────────────
@@ -421,6 +463,11 @@ def voice_status() -> dict[str, Any]:
         "sapi_available": sapi,
         "tts_english_ready": tts_english.is_available() or sapi,
         "tts_tamil_ready": tts_tamil.is_available(),
+        "kuyil_available": tts_kuyil.is_available(),
+        "kuyil_voices": tts_kuyil.voices,
+        "kuyil_model": str(tts_kuyil.model_path) if tts_kuyil.model_path else None,
+        "tts_engine": _tts_engine_cfg(),
+        "tts_engines": [name for name in TTS_ENGINES if name != "sapi" or sapi],
         "whisper_available": HAS_WHISPER,
         "whisper_model": stt.model_size if HAS_WHISPER else None,
         "whisper_model_ready": stt.model_ready() if HAS_WHISPER else False,

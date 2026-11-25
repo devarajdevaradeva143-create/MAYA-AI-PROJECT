@@ -10,10 +10,11 @@ from app.services.voice_service import VoiceAdapter, VoiceError
 
 
 def test_piper_tamil_synthesize_wav(tmp_path: Path) -> None:
-    model = Path("MAYA AI/voice/tamil/ta_IN-ValluvarNeural-medium.onnx")
-    if not model.is_file():
-        pytest.skip("Tamil Piper model not installed")
     from custom.tools import voice as voice_tools
+
+    model = voice_tools.tts_tamil.model_path
+    if model is None or not model.is_file():
+        pytest.skip("Tamil Piper model not installed")
 
     tts = voice_tools.tts_tamil
     if not tts.is_available():

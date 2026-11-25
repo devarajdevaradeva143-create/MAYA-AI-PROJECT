@@ -35,8 +35,8 @@ MAYA AI/voice/**/*.onnx.json
 *.aar
 
 # Build artifacts
-LAPTOP/windows/build/
-LAPTOP/windows/dist/
+WINDOWS APPLICATION/windows/build/
+WINDOWS APPLICATION/windows/dist/
 MOBILE APP/app/build/
 MOBILE APP/.gradle/
 MOBILE APP/.idea/

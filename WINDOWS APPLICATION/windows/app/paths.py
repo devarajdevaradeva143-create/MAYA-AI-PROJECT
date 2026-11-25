@@ -1,7 +1,7 @@
 r"""Path resolution for the Maya Windows app (source and packaged).
 
 Rules (plan section 17):
-- Dev: APP_ROOT = LAPTOP\windows, PROJECT_ROOT = project folder.
+- Dev: APP_ROOT = WINDOWS APPLICATION\windows, PROJECT_ROOT = project folder.
 - Packaged: APP_ROOT = folder that holds mayaai.exe (MAYA AI\ sits next to it).
   `__file__` lives in the PyInstaller temp extraction folder, so the exe
   location (`sys.executable`) is the only reliable anchor there.
@@ -59,7 +59,7 @@ def _candidate_maya_dirs() -> list[Path]:
 
     add(APP_ROOT / "MAYA AI")
     if is_frozen():
-        # dist\ -> windows\ -> LAPTOP\ -> project root -> Desktop
+        # dist\ -> windows\ -> WINDOWS APPLICATION\ -> project root -> Desktop
         for parent in list(APP_ROOT.parents)[:_FROZEN_SEARCH_DEPTH]:
             add(parent / "MAYA AI")
         # exe dropped inside `MAYA AI\` itself

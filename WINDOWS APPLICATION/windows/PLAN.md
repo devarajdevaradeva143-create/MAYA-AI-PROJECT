@@ -25,7 +25,7 @@
 **All 161 tests pass, ruff clean.**
 
 **OS:** Windows 10 / 11 (tested on Windows 11 build 26300)
-**Project folder:** `C:\Users\devar\Desktop\MAYA AI PROJECT\LAPTOP\windows\`
+**Project folder:** `C:\Users\devar\Desktop\MAYA AI PROJECT\WINDOWS APPLICATION\windows\`
 **Shared engine code:** `JARVIS\custom\` (namma code — edit allowed ✅)
 **OpenJarvis:** `JARVIS\OpenJarvis\` — **READ ONLY** ❌
 

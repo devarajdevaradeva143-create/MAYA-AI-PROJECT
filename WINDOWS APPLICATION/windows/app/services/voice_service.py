@@ -71,7 +71,6 @@ class VoiceAdapter:
         self._preferred_voices = [
             str(name) for name in (tts.get("preferred_voices") or []) if str(name).strip()
         ]
-        self._configured_engine = str(tts.get("engine", "auto"))
 
         stt = voice.get("stt")
         if not isinstance(stt, dict):
@@ -126,9 +125,15 @@ class VoiceAdapter:
             },
             "tts": {
                 "engine": "piper" if (piper_available or voice_tools.tts_tamil.is_available()) else ("sapi" if sapi_available else "none"),
-                "available": piper_available or sapi_available or voice_tools.tts_tamil.is_available(),
+                "selected": str(voice_tools._tts_engine_cfg() or "auto"),
+                "available": piper_available or sapi_available or voice_tools.tts_tamil.is_available() or voice_tools.tts_kuyil.is_available(),
                 "voices": self._preferred_voices,
                 "tamil_available": voice_tools.tts_tamil.is_available(),
+                "kuyil": {
+                    "available": voice_tools.tts_kuyil.is_available(),
+                    "voices": voice_tools.tts_kuyil.voices,
+                    "selected_voice": voice_tools.tts_kuyil.voice,
+                },
                 "piper": {
                     "available": piper_available or voice_tools.tts_tamil.is_available(),
                     "voices": [voice_tools.tts_tamil.model_path.stem] if voice_tools.tts_tamil.model_path else ([piper_model.stem] if piper_model else []),
@@ -264,10 +269,21 @@ class VoiceAdapter:
             raise RuntimeError("Text too long")
 
         choice = (engine or "auto").lower()
-        if choice not in {"auto", "sapi", "piper"}:
+        if choice == "auto":
+            configured = str(voice_tools._tts_engine_cfg() or "auto").lower()
+            if configured != "auto":
+                choice = configured
+        if choice not in {"auto", "sapi", "piper", "kuyil"}:
             raise RuntimeError(f"Unknown TTS engine: {engine}")
 
         target = _temp_dir() / f"tts-{int(time.time() * 1000)}-{id(text) & 0xFFFF}.wav"
+
+        # Tamil: Kuyil reads English words properly, so it is the auto choice.
+        if choice == "kuyil" or (choice == "auto" and _voice_lang_key(lang) == "ta"):
+            if self._kuyil_wav(text, target):
+                return target
+            if choice == "kuyil":
+                raise RuntimeError("Kuyil TTS is not installed")
 
         if choice in {"auto", "piper"}:
             if self._piper_wav(text, lang, target):
@@ -407,6 +423,15 @@ class VoiceAdapter:
             return False
 
         if completed.returncode != 0 or not target.is_file():
+            return False
+        return self._valid_wav(target)
+
+    def _kuyil_wav(self, text: str, target: Path) -> bool:
+        tts = voice_tools.tts_kuyil
+        if not tts.is_available():
+            return False
+        err = tts.synthesize_wav(text, target)
+        if err:
             return False
         return self._valid_wav(target)
 

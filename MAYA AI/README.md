@@ -15,8 +15,8 @@ MAYA AI/
 ```
 
 OS-kku thevaiyana files mattum:
-- `LAPTOP\windows\`
-- `LAPTOP\fedora\`
+- `WINDOWS APPLICATION\windows\`
+- `WINDOWS APPLICATION\fedora\`
 
 ## Rules
 

@@ -179,6 +179,7 @@ class MayaMainWindow(QMainWindow):
                 voice=self._voice_adapter,
                 wake=self._wake_adapter,
                 chat=self._chat,
+                repository=self._repository,
             )
         elif key == "pc":
             page = PCPage(control=self._control)

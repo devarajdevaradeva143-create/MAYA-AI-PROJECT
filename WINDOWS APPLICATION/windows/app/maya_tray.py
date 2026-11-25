@@ -4,7 +4,7 @@ Small tray icon that lets you open Maya chat, check system status, test the
 voice, and quit. Everything runs locally.
 
 Run:
-    python LAPTOP/windows/app/maya_tray.py
+    python "WINDOWS APPLICATION/windows/app/maya_tray.py"
 
 Needs (optional):
     uv pip install pystray pillow
@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Project root: this file -> app -> windows -> LAPTOP -> project root
+# Project root: this file -> app -> windows -> WINDOWS APPLICATION -> project root
 ROOT = Path(__file__).resolve().parents[3]
 MAYA_DIR = ROOT / "JARVIS"
 

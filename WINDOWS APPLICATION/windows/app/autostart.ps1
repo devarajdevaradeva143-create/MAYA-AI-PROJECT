@@ -4,17 +4,17 @@
 # Run as Administrator once after installation.
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File LAPTOP/windows/app/autostart.ps1
+#   powershell -ExecutionPolicy Bypass -File "WINDOWS APPLICATION/windows/app/autostart.ps1"
 
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Resolve-Path "C:\Users\devar\Desktop\MAYA AI PROJECT"
 $mayaMaya = Join-Path $projectRoot "JARVIS"
 $pythonExe = Join-Path $mayaMaya ".venv-engine\Scripts\python.exe"
-$trayScript = Join-Path $projectRoot "LAPTOP\windows\app\maya_tray.py"
+$trayScript = Join-Path $projectRoot "WINDOWS APPLICATION\windows\app\maya_tray.py"
 
 $taskName = "MayaAI"
-$taskDescription = "Maya AI — Local Personal Assistant"
+$taskDescription = "Maya AI - Local Personal Assistant"
 
 # Check if python exists
 if (-not (Test-Path $pythonExe)) {
@@ -37,7 +37,7 @@ try {
 }
 
 # Create the task
-$action = New-ScheduledTaskAction -Execute $pythonExe -Argument "$trayScript" -WorkingDirectory $mayaMaya
+$action = New-ScheduledTaskAction -Execute $pythonExe -Argument ('"{0}"' -f $trayScript) -WorkingDirectory $mayaMaya
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType S4U -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable

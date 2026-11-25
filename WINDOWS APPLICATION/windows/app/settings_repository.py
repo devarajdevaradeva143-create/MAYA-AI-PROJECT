@@ -180,7 +180,7 @@ _SCHEMA: dict[str, Callable[[Any], Any]] = {
     "security.watchdog.idle_lock_minutes": _as_int(0, 240),
     "security.watchdog.max_session_minutes": _as_int(0, 1440),
     "security.watchdog.voice_check_minutes": _as_int(0, 240),
-    "voice.tts.engine": _as_choice("auto", "piper", "sapi"),
+    "voice.tts.engine": _as_choice("auto", "kuyil", "piper", "sapi"),
     "voice.tts.volume": _as_int(0, 100),
     "voice.clap.threshold": _as_int(100, 20000),
     "voice.clap.count": _as_int(1, 10),

@@ -26,6 +26,17 @@ semantic = ["model2vec>=0.10"]
 # Local voice models (Piper TTS / faster-whisper STT). Optional: the CLI
 # reports an honest "not installed" message when these are missing.
 voice = ["piper-tts>=1.8.0", "faster-whisper>=1.2.1", "av>=18,<19"]
+# Kuyil TTS — tiny offline Tamil/Tanglish voice (torch CPU, ~90 MB model).
+# Optional: `voice.tts.engine` falls back to Piper/SAPI when it is missing.
+kuyil = [
+    "torch>=2.1",
+    "onnxruntime>=1.17",
+    "safetensors>=0.4",
+    "scipy>=1.11",
+    "soundfile>=0.12",
+    "cmudict>=1.0",
+    "uraikal>=0.1,<0.2",
+]
 
 [project.scripts]
 maya = "custom.cli:main"
@@ -38,3 +49,7 @@ packages = ["custom"]
 [tool.pytest.ini_options]
 testpaths = ["custom/tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+# Vendored third-party code is kept verbatim (see custom/vendor/kuyil/LICENSE).
+extend-exclude = ["custom/vendor"]

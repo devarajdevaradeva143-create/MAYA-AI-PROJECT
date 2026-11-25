@@ -105,7 +105,7 @@ JARVIS\
 ### D. OS-specific
 
 ```
-MAYA AI PROJECT\LAPTOP\
+MAYA AI PROJECT\WINDOWS APPLICATION\
 └─ windows\app\      ← Windows app code
 ```
 

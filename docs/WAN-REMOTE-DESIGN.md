@@ -81,7 +81,7 @@ server:
 
 1. ✅ Add `wan_host` to `/health` + capabilities (code only). The advertised
    host comes from `server.wan.host`, falling back to `relay_url`.
-2. ✅ Tailscale install guide in `LAPTOP/windows/README.md` → "Internet (WAN)
+2. ✅ Tailscale install guide in `WINDOWS APPLICATION/windows/README.md` → "Internet (WAN)
    remote — Tailscale".
 3. Optional: custom relay deployment script (VPS) — deferred (user action).
 4. Optional: ACME/Let's Encrypt cert renewal — deferred (user action).
