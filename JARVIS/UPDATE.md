@@ -24,8 +24,7 @@ JARVIS/
 ├─ patches/             ← OpenJarvis changes (patch files)
 ├─ backups/             ← update history / config backup
 ├─ scripts/
-│  ├─ update_openjarvis.ps1    ← Windows
-│  └─ update_openjarvis.sh     ← Fedora
+│  └─ update_openjarvis.ps1    ← Windows
 └─ UPDATE.md            ← ithu file
 ```
 
@@ -44,16 +43,6 @@ Enna pannum:
 4. `patches\*.patch` reapply
 5. Stash restore
 6. `uv sync` — dependencies update
-
----
-
-## 4. Update panna (Fedora)
-
-```bash
-bash scripts/update_openjarvis.sh
-```
-
-Adhe steps dhaan.
 
 ---
 

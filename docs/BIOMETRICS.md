@@ -181,9 +181,7 @@ python -m custom.cli security watchdog --idle-minutes 10 --voice-every 30
 python -m custom.cli security watchdog --once
 ```
 
-Idle detection uses `GetLastInputInfo` on Windows. Fedora needs X11
-`xprintidle`; on Wayland the command warns that idle locking is inactive
-(session and voice checks still work). A voice check is **skipped, not failed**
+Idle detection uses `GetLastInputInfo` on Windows. On Wayland, the command warns that idle locking is inactive (session and voice checks still work). A voice check is **skipped, not failed**
 when no voice password is enrolled or the speaker model is missing. Once the
 check is enabled and runnable, a failed, silent or errored check locks the
 session — fail closed.

@@ -14,11 +14,11 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.devaraj.mobileapplication"
+    namespace = "com.devaraj.maya"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.devaraj.mobileapplication"
+        applicationId = "com.devaraj.maya"
         minSdk = 36
         targetSdk = 36
         versionCode = 2

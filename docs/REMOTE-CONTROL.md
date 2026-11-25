@@ -49,7 +49,7 @@ call extends it. Server restart drops all sessions.
   stream.
 - Keyboard supports the allowlist in the contract; arbitrary shortcuts use
   the text field.
-- Fedora adapter for screen/input is not wired yet (Windows only).
+- Screen capture uses Pillow (Windows only).
 - AI task execution inside HYBRID is still laptop-side chat; the phone shows
   the control bus and can take over.
 - Internet (WAN) remote control needs a relay/TLS design; use LAN/hotspot/USB

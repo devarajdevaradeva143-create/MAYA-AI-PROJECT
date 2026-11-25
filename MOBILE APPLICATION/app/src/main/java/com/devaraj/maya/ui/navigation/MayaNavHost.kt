@@ -118,6 +118,12 @@ fun MayaNavHost(
                     chatRepository = app.container.chatRepository,
                     connectionRepository = app.container.connectionRepository,
                     apiClient = app.container.apiClient,
+                    settingsStore = app.container.settingsStore,
+                    piperTts = app.container.piperTts,
+                    geminiRepository = app.container.geminiRepository,
+                    onDeviceModel = app.container.onDeviceModel,
+                    geminiTts = app.container.geminiTts,
+                    geminiVoicePlayer = app.container.geminiVoicePlayer,
                 )
             }
             val voiceViewModel: VoiceViewModel = viewModel(factory = voiceFactory)

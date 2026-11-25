@@ -327,7 +327,7 @@ private fun StatusCard(connectionState: ConnectionState, device: Device) {
                     label = "OS",
                     value = when (health.platform) {
                         "win32", "windows" -> "Windows"
-                        "linux" -> "Linux / Fedora"
+                        "linux" -> "Linux"
                         "darwin" -> "macOS"
                         else -> health.platform
                     },

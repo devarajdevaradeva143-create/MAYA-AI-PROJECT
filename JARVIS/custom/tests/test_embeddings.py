@@ -8,6 +8,7 @@ from custom.tools import embeddings
 
 def test_default_model_name(monkeypatch):
     monkeypatch.delenv("MAYA_EMBED_MODEL", raising=False)
+    monkeypatch.setattr(config, "load_settings", lambda: {})
     assert embeddings.model_name() == embeddings.DEFAULT_MODEL_NAME
 
 

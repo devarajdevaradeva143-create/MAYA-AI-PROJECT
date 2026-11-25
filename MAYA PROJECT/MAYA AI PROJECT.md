@@ -63,7 +63,6 @@ MAYA AI PROJECT\
 │  └─ scripts\            ← launchers
 ├─ WINDOWS APPLICATION\
 │  ├─ windows\            ← Windows app
-│  └─ fedora\             ← Fedora app
 ├─ DEVARAJ\               ← un details + chat history
 ├─ MOBILE APP\            ← appuram
 └─ docs\                  ← notes
@@ -156,7 +155,6 @@ App close pannaalum velai seiyum.
 | Platform | Eppadi |
 |---|---|
 | Windows | Startup app / Task Scheduler |
-| Fedora | systemd service |
 | Mobile | Background service (appuram) |
 
 ### Wake up

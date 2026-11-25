@@ -7,13 +7,17 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import com.devaraj.maya.data.secure.SecretStore
 import com.devaraj.maya.domain.model.OperatingMode
 
 private val Context.mayaDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -44,6 +48,8 @@ data class MayaSettings(
     val voiceBiometricsEnabled: Boolean = false,
     val phoneRemoteEnabled: Boolean = false,
     val geminiApiKey: String = "",
+    val ttsEngine: String = "system",
+    val ttsSpeed: Float = 1.0f,
 ) {
     companion object {
         const val DEFAULT_PORT = 8420
@@ -54,6 +60,9 @@ data class MayaSettings(
  * Local-only settings. Nothing here ever leaves the phone.
  */
 class SettingsStore(private val context: Context) {
+
+    /** Keystore-backed encryption for secrets (Gemini API key). */
+    private val secretStore = SecretStore(context)
 
     private object Keys {
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
@@ -69,7 +78,13 @@ class SettingsStore(private val context: Context) {
         val OPERATING_MODE = stringPreferencesKey("operating_mode")
         val VOICE_BIOMETRICS_ENABLED = booleanPreferencesKey("voice_biometrics_enabled")
         val PHONE_REMOTE_ENABLED = booleanPreferencesKey("phone_remote_enabled")
-        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        /** Encrypted (AES-GCM) key. Never stored as plaintext. */
+        val GEMINI_API_KEY_ENC = stringPreferencesKey("gemini_api_key_enc")
+
+        /** Legacy plaintext key — read once for migration, then deleted. */
+        val GEMINI_API_KEY_LEGACY = stringPreferencesKey("gemini_api_key")
+        val TTS_ENGINE = stringPreferencesKey("tts_engine")
+        val TTS_SPEED = floatPreferencesKey("tts_speed")
     }
 
     val settings: Flow<MayaSettings> = context.mayaDataStore.data
@@ -89,9 +104,13 @@ class SettingsStore(private val context: Context) {
                 wakeNameEnabled = prefs[Keys.WAKE_NAME_ENABLED] ?: false,
                 operatingMode = OperatingMode.from(prefs[Keys.OPERATING_MODE]),
                 phoneRemoteEnabled = prefs[Keys.PHONE_REMOTE_ENABLED] ?: false,
-                geminiApiKey = prefs[Keys.GEMINI_API_KEY] ?: "",
+                geminiApiKey = secretStore.decrypt(prefs[Keys.GEMINI_API_KEY_ENC] ?: ""),
+                ttsEngine = prefs[Keys.TTS_ENGINE] ?: "system",
+                ttsSpeed = prefs[Keys.TTS_SPEED] ?: 1.0f,
             )
         }
+        // Keystore decryption is IO; keep it off the main thread.
+        .flowOn(Dispatchers.IO)
 
     suspend fun setOnboardingDone(done: Boolean) {
         context.mayaDataStore.edit { it[Keys.ONBOARDING_DONE] = done }
@@ -153,8 +172,39 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun setGeminiApiKey(key: String) {
+        val trimmed = key.trim()
         context.mayaDataStore.edit { prefs ->
-            prefs[Keys.GEMINI_API_KEY] = key
+            prefs[Keys.GEMINI_API_KEY_ENC] = secretStore.encrypt(trimmed)
+            // Drop any leftover plaintext key.
+            prefs.remove(Keys.GEMINI_API_KEY_LEGACY)
+        }
+    }
+
+    /**
+     * Move a key saved by older versions (plaintext in DataStore) into
+     * encrypted storage. Safe to call on every launch.
+     */
+    suspend fun migrateLegacyGeminiKey() {
+        context.mayaDataStore.edit { prefs ->
+            val legacy = prefs[Keys.GEMINI_API_KEY_LEGACY]
+            if (!legacy.isNullOrBlank()) {
+                if (prefs[Keys.GEMINI_API_KEY_ENC].isNullOrBlank()) {
+                    prefs[Keys.GEMINI_API_KEY_ENC] = secretStore.encrypt(legacy)
+                }
+                prefs.remove(Keys.GEMINI_API_KEY_LEGACY)
+            }
+        }
+    }
+
+    suspend fun setTtsEngine(engine: String) {
+        context.mayaDataStore.edit { prefs ->
+            prefs[Keys.TTS_ENGINE] = engine
+        }
+    }
+
+    suspend fun setTtsSpeed(speed: Float) {
+        context.mayaDataStore.edit { prefs ->
+            prefs[Keys.TTS_SPEED] = speed
         }
     }
 

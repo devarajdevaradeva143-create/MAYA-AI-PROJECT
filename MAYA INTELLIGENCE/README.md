@@ -136,6 +136,6 @@ git -C JARVIS/OpenJarvis status --porcelain           # empty
 
 - Replacing `maya` / `maya-cloud` CLIs or the 13 phases
 - Editing `JARVIS/custom/`
-- Mobile app, Fedora specifics, Gemini/cloud
+- Mobile app, Gemini/cloud
 - Strong Tamil ASR/TTS (needs Whisper + Tamil `.onnx`)
 - GUI changes; editable-install packaging

@@ -11,3 +11,6 @@ captures/
 .cxx/
 app/src/main/assets/models/*.gguf
 app/src/main/assets/piper/*.onnx
+app/src/main/assets/piper/*.json
+app/src/main/assets/piper/tokens.txt
+app/src/main/assets/piper/espeak-ng-data/

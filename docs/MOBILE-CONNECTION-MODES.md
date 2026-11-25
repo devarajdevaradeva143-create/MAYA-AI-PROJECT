@@ -22,7 +22,7 @@ Wrong mode → clear connection error on the Laptop tab ("No response from lapto
 
 ## Bluetooth PAN
 1. Pair phone and laptop over Bluetooth.
-2. On the laptop, enable Bluetooth tethering / PAN (Network & Internet → Mobile hotspot → Bluetooth tethering on Windows; or `bluetoothctl` + `bt-network` on Fedora).
+2. On the laptop, enable Bluetooth tethering / PAN (Network & Internet → Mobile hotspot → Bluetooth tethering on Windows).
 3. Phone: connect to the laptop's Bluetooth PAN network (Android auto-connects after pairing + tethering enabled).
 4. Phone: Settings → Connection mode → Bluetooth. Enter the laptop's PAN IP (shown by `ipconfig` / `ip addr` on the laptop) in the Laptop tab host field.
 5. Pair once over PAN.

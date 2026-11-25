@@ -378,6 +378,14 @@ class SettingsViewModel(
         settingsStore.setGeminiApiKey(key)
     }
 
+    suspend fun setTtsEngine(engine: String) {
+        settingsStore.setTtsEngine(engine)
+    }
+
+    suspend fun setTtsSpeed(speed: Float) {
+        settingsStore.setTtsSpeed(speed)
+    }
+
     class Factory(
         private val app: Application,
         private val settingsStore: SettingsStore,

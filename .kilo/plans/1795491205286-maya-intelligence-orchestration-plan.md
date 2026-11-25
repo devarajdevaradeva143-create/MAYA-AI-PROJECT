@@ -152,7 +152,7 @@ Smoke:
 ## 10. Out of scope
 
 - Replacing `maya` / `maya-cloud` CLIs or the 13 phases; editing `custom/`.
-- Mobile app, Fedora specifics, Gemini/cloud.
+- Mobile app, Gemini/cloud.
 - Strong Tamil ASR/TTS (needs Whisper + Tamil `.onnx`).
 - GUI changes; editable-install packaging.
 

@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.devaraj.maya.data.cloud.GeminiRepository
 import com.devaraj.maya.data.model.OnDeviceModelManager
+import com.devaraj.maya.data.persona.PersonaPrompts
 import com.devaraj.maya.data.model.PromptBuilder
 import com.devaraj.maya.data.remote.ApiClient
 import com.devaraj.maya.data.remote.ChatEvent
@@ -344,11 +345,7 @@ class ChatViewModel(
             runCatching {
                 geminiRepository.chat(
                     messages = messages,
-                    systemPrompt = if (_state.value.persona == ChatUiState.PERSONA_TEACHER) {
-                        "You are Maya, an English teacher. Help the user learn English."
-                    } else {
-                        "You are Maya, a personal AI assistant. Reply concisely."
-                    },
+                    systemPrompt = PersonaPrompts.forPersona(_state.value.persona),
                     maxTokens = 1024,
                 )
             }
@@ -361,14 +358,14 @@ class ChatViewModel(
         }
 
         result.fold(
-            onSuccess = { text ->
-                streamBuffer = StringBuffer(text)
+            onSuccess = { reply ->
+                streamBuffer = StringBuffer(reply.text)
                 finishStream(MessageStatus.SENT)
             },
-            onFailure = { error ->
+            onFailure = {
                 failStream(
                     reason = MayaErrorReason.UNKNOWN,
-                    message = "Gemini: ${error.message ?: "cloud request failed"}",
+                    message = "Gemini konjam busy-a irukku. Konjam neram kazhichu Retry pannunga.",
                 )
             },
         )

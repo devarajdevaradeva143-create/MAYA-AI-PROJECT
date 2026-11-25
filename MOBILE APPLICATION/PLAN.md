@@ -113,12 +113,12 @@ Maya = **command only**. Thana ethuvum pannadhu ❌.
 │  Service: foreground mic / wake            │
 └───────────────┬────────────────────────────┘
                 │ WiFi LAN / USB (adb reverse) / BT PAN
-        ┌───────▼─────────┐
-        │  LAPTOP SERVER  │
-        │  FastAPI :8420  │
-        │  Qwen 3B        │
-        │  Windows/Fedora │
-        └─────────────────┘
+┌───────▼─────────┐
+         │  LAPTOP SERVER  │
+         │  FastAPI :8420  │
+         │  Qwen 3B        │
+         │  Windows        │
+         └─────────────────┘
 ```
 
 **Source-of-truth priority for chat:**
@@ -2065,5 +2065,5 @@ Native deps (Phase 9):
 
 ---
 
-**Next file to read:** `WINDOWS APPLICATION\windows\PLAN.md` (server side) + `docs\API-CONTRACT.md`.
+**Next file to read:** `LAPTOP\windows\PLAN.md` (server side) + `docs\API-CONTRACT.md`.
 **Build command:** `.\gradlew.bat assembleDebug`

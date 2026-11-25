@@ -4,7 +4,7 @@ Maya cannot silently identify a face (Windows Hello always needs a gesture),
 so this watchdog implements the checks that are possible offline:
 
 * **idle auto-lock** — lock the session after N minutes without keyboard or
-  mouse input (Windows ``GetLastInputInfo``; X11 ``xprintidle`` on Fedora);
+  mouse input (Windows ``GetLastInputInfo``);
 * **session expiry** — lock N minutes after the last successful unlock, so a
   session cannot stay open forever;
 * **voice re-check** — optionally ask for the enrolled spoken phrase every N
@@ -107,28 +107,11 @@ def _windows_idle_seconds() -> Optional[float]:
     return elapsed_ms / 1000.0
 
 
-def _linux_idle_seconds() -> Optional[float]:
-    executable = shutil.which("xprintidle")
-    if not executable:
-        return None
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        return None
-    try:
-        completed = subprocess.run(
-            [executable], capture_output=True, text=True, timeout=2
-        )
-        if completed.returncode != 0:
-            return None
-        return max(0.0, int(completed.stdout.strip()) / 1000.0)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-
-
 def idle_seconds() -> Optional[float]:
     """Seconds since the last keyboard/mouse input, or ``None`` if unknown."""
     if os.name == "nt":
         return _windows_idle_seconds()
-    return _linux_idle_seconds()
+    return None
 
 
 # ── Voice re-check ─────────────────────────────────────────────────────────

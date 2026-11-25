@@ -1,8 +1,7 @@
 # HANDOFF PROMPT — Maya AI (copy everything below to another AI)
 
 You are a senior Python engineer continuing **Maya AI**, a local-first personal
-assistant for Windows (HP OmniBook 5, Ryzen AI 5 340) that will later also run
-on Fedora. All 13 build phases are done; your job is the remaining work listed
+assistant for Windows (HP OmniBook 5, Ryzen AI 5 340). All 13 build phases are done; your job is the remaining work listed
 at the bottom.
 
 ---
@@ -64,7 +63,6 @@ git -C OpenJarvis status --porcelain     # must be empty
 ```
 
 Windows launcher: `MAYA AI\scripts\maya.ps1 <args>`
-Fedora launcher: `bash "MAYA AI/scripts/maya.sh" <args>`
 
 ---
 
@@ -103,9 +101,7 @@ OS layer:
 - `WINDOWS APPLICATION/windows/app/maya_tray.py` — tray app (needs `pystray` + `pillow`;
   falls back to terminal chat when missing)
 - `WINDOWS APPLICATION/windows/app/install_autostart.ps1` — Task Scheduler autostart
-- `WINDOWS APPLICATION/fedora/app/maya.service` + `install_service.sh` — systemd user unit
-  that runs `monitor start` (written, not yet tested on Fedora)
-- `MAYA AI/scripts/maya.ps1` / `maya.sh` — launchers (verified on Windows)
+- `MAYA AI/scripts/maya.ps1` — launcher (verified on Windows)
 
 Docs: `docs/ROADMAP.md` (phase status), `docs/ENGINE-SETUP.md`,
 `docs/KNOWLEDGE.md`, `docs/VOICE.md`, `docs/CLOUD.md`,
@@ -216,8 +212,7 @@ better Tamil paraphrase quality (≈512 MB download) via
 - Pairing codes are long-lived shared secrets: never pass them on the command
   line in examples (shell history), and never log or print them after pairing.
 - `security watchdog` is **command-only**; never add it to autostart without
-  the user asking. Idle lock needs `GetLastInputInfo` (Windows) or `xprintidle`
-  (Fedora X11); on Wayland it reports idle locking inactive.
+  the user asking. Idle lock needs `GetLastInputInfo` (Windows); on Wayland it reports idle locking inactive.
 - Voice re-check is periodic and **fail-closed** once enabled: no signal, a
   mismatch or a mic error locks the session. It is skipped (not failed) when
   no voice password is enrolled or the speaker model is missing.

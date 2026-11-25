@@ -1,6 +1,6 @@
 # MAYA AI — Common Folder
 
-Ithu **Windows + Fedora rendu OS-kum common**.
+Ithu **Windows OS-kku common**.
 
 ```
 MAYA AI/
@@ -16,7 +16,6 @@ MAYA AI/
 
 OS-kku thevaiyana files mattum:
 - `WINDOWS APPLICATION\windows\`
-- `WINDOWS APPLICATION\fedora\`
 
 ## Rules
 

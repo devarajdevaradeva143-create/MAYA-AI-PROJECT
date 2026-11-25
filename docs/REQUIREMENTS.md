@@ -2,15 +2,14 @@
 
 > **Source:** User-provided spec (Tamil), captured 2026-11-19.  
 > **Status:** Design / requirements only.  
-> **Scope:** Integrated Computer Control System — Windows + Fedora + Android, three modes (AI / REMOTE / HYBRID).
+> **Scope:** Integrated Computer Control System — Windows + Android, three modes (AI / REMOTE / HYBRID).
 
 ## Summary
 
-MAYA AI is an AI + Remote Computer Control System that runs on **Windows and Fedora Linux (KDE)**. Three applications:
+MAYA AI is an AI + Remote Computer Control System that runs on **Windows**. Two applications:
 
 1. Windows Application
-2. Fedora Application
-3. Android Mobile Application
+2. Android Mobile Application
 
 Three operating modes:
 
@@ -49,25 +48,14 @@ Three operating modes:
 ### Windows Application
 Windows MAYA AI, Windows PC control, screen sharing, mouse/keyboard control, AI task execution, all three modes.
 
-### Fedora Application (KDE)
-Fedora MAYA AI, Fedora PC control, screen sharing, mouse/keyboard control, AI task execution, all three modes. Target: Fedora 40+, Plasma 6.x, Wayland primary.
-
 ### Android Mobile Application
 - Laptop ID + Password input.
-- Connect to Windows or Fedora.
+- Connect to Windows.
 - AI / REMOTE / HYBRID mode selection.
 - Voice & text commands to MAYA.
 - View & control laptop screen.
 - File transfer.
 - Connect / disconnect.
-
-## Dual Boot
-Single laptop with Windows + Fedora (dual boot). Only one OS runs at a time.
-- Boot Windows → Windows MAYA AI active.
-- Boot Fedora → Fedora MAYA AI active.
-- Mobile auto-detects running OS.
-- Non-running OS shown as Offline.
-- On OS switch, old connection drops, new connection forms.
 
 ## Security
 - Secure password authentication.
@@ -84,25 +72,24 @@ Manages four connection types:
 3. Bluetooth
 4. Internet
 
-Capabilities: discover available connections, check status, secure connect, retry on drop, switch connection type on demand, integrate across Windows/Fedora/Android. Bluetooth for nearby devices; Internet/Network for remote control.
+Capabilities: discover available connections, check status, secure connect, retry on drop, switch connection type on demand, integrate across Windows/Android. Bluetooth for nearby devices; Internet/Network for remote control.
 
 Shared implementation: `JARVIS/custom/tools/connection_manager.py`.
 
 ## Final goal
-One MAYA AI controlling both Windows and Fedora, three apps (Windows/Fedora/Android), three modes (AI/REMOTE/HYBRID), consistent experience across all three.
+One MAYA AI controlling Windows, two apps (Windows/Android), three modes (AI/REMOTE/HYBRID), consistent experience across both.
 
 ## Implementation status (design only where marked)
 
-| Area | Windows | Fedora | Android |
-|---|---|---|---|
-| AI MODE | Partial | Placeholder | Partial |
-| REMOTE MODE | Implemented (screen/input/files) | Partial (no screen/input adapter yet) | Implemented |
-| HYBRID MODE | Implemented (control bus) | Partial | Implemented |
-| Connection Manager | Partial | Not started | Partial |
-| Security | Done | Not started | Partial |
-| Dual-boot awareness | Partial | Not started | Partial |
+| Area | Windows | Android |
+|---|---|---|
+| AI MODE | Partial | Partial |
+| REMOTE MODE | Implemented (screen/input/files) | Implemented |
+| HYBRID MODE | Implemented (control bus) | Implemented |
+| Connection Manager | Partial | Partial |
+| Security | Done | Partial |
+| Dual-boot awareness | N/A | N/A |
 
 Windows app reference: `WINDOWS APPLICATION/windows/README.md` (build complete, tests pass).  
-Fedora app reference: `WINDOWS APPLICATION/fedora/README.md` (placeholder).  
 Android app reference: `MOBILE APP/README.md` (build complete, phases 0-12).
 path: C:\Users\devar\Desktop\MAYA AI PROJECT\docs\REQUIREMENTS.md

@@ -11,13 +11,22 @@ import android.speech.tts.UtteranceProgressListener
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.devaraj.maya.data.cloud.GeminiRepository
+import com.devaraj.maya.data.cloud.GeminiTtsRepository
+import com.devaraj.maya.data.model.OnDeviceModelManager
+import com.devaraj.maya.data.persona.PersonaPrompts
+import com.devaraj.maya.data.prefs.SettingsStore
 import com.devaraj.maya.data.remote.ApiClient
 import com.devaraj.maya.data.remote.ChatMessageDto
 import com.devaraj.maya.data.remote.ChatRequest
 import com.devaraj.maya.data.remote.ConnectionRepository
 import com.devaraj.maya.data.remote.ConnectionState
 import com.devaraj.maya.data.repo.ChatRepository
+import com.devaraj.maya.domain.model.AiSource
 import com.devaraj.maya.domain.model.MessageRole
+import com.devaraj.maya.voice.GeminiVoicePlayer
+import com.devaraj.maya.voice.PiperTts
+import com.devaraj.maya.voice.SpeechText
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.text.isNotBlank
 
 enum class VoicePhase {
     Idle,
@@ -50,6 +60,12 @@ class VoiceViewModel(
     private val chatRepository: ChatRepository,
     private val connectionRepository: ConnectionRepository,
     private val apiClient: ApiClient,
+    private val settingsStore: SettingsStore,
+    private val piperTts: PiperTts?,
+    private val geminiRepository: GeminiRepository?,
+    private val onDeviceModel: OnDeviceModelManager?,
+    private val geminiTts: GeminiTtsRepository?,
+    private val geminiVoicePlayer: GeminiVoicePlayer?,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VoiceUiState())
@@ -60,10 +76,18 @@ class VoiceViewModel(
     private var ttsReady = false
     private var activeConversationId: String? = null
     private var pendingSpeak: String? = null
+    private var currentTtsEngine: String = "system"
+    private var currentTtsSpeed: Float = 1.0f
 
     init {
         _state.update { it.copy(recognizerAvailable = SpeechRecognizer.isRecognitionAvailable(app)) }
         initTts()
+        viewModelScope.launch {
+            settingsStore.settings.collect { s ->
+                currentTtsEngine = s.ttsEngine
+                currentTtsSpeed = s.ttsSpeed
+            }
+        }
         viewModelScope.launch {
             val conversation = chatRepository.latestConversation() ?: chatRepository.ensureConversation()
             activeConversationId = conversation.id
@@ -74,7 +98,8 @@ class VoiceViewModel(
         tts = TextToSpeech(app) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
             if (ttsReady) {
-                tts?.language = Locale.US
+                val lang = if (currentTtsEngine == "piper") Locale.forLanguageTag("ta-IN") else Locale.getDefault()
+                tts?.language = lang
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) {
@@ -154,6 +179,8 @@ class VoiceViewModel(
 
     private fun stopSpeakingInternal() {
         try { tts?.stop() } catch (_: Exception) {}
+        piperTts?.stop()
+        geminiVoicePlayer?.stop()
     }
 
     private val listener = object : RecognitionListener {
@@ -220,13 +247,6 @@ class VoiceViewModel(
     }
 
     private fun sendToMaya(text: String) {
-        val connection = connectionRepository.state.value
-        if (connection !is ConnectionState.Connected) {
-            _state.update {
-                it.copy(phase = VoicePhase.Error, errorResId = com.devaraj.maya.R.string.voice_error_no_connection)
-            }
-            return
-        }
         viewModelScope.launch {
             try {
                 val conversationId = activeConversationId ?: chatRepository.ensureConversation().id.also {
@@ -241,23 +261,72 @@ class VoiceViewModel(
                         else -> null
                     }
                 }
-                val response = withContext(Dispatchers.IO) {
-                    apiClient.api(connection.device.host, connection.device.port).chat(
-                        ChatRequest(
-                            conversationId = conversationId,
-                            persona = "maya",
-                            messages = history,
-                        ),
-                    )
+
+                val reply = withContext(Dispatchers.IO) {
+                    val connection = connectionRepository.state.value
+                    when {
+                        connection is ConnectionState.Connected -> {
+                            val response = apiClient.api(connection.device.host, connection.device.port).chat(
+                                ChatRequest(
+                                    conversationId = conversationId,
+                                    persona = "maya",
+                                    messages = history,
+                                ),
+                            )
+                            chatRepository.addMayaMessage(
+                                conversationId = conversationId,
+                                text = response.reply.trim(),
+                                model = response.model,
+                                source = AiSource.LAPTOP,
+                            )
+                            response.reply.trim() to AiSource.LAPTOP
+                        }
+                        onDeviceModel != null && onDeviceModel.statusText().contains("valid", ignoreCase = true) -> {
+                            val prompt = buildVoicePrompt(history)
+                            val result = onDeviceModel.generate(prompt, 1024)
+                            result.getOrDefault("")?.let { reply ->
+                                chatRepository.addMayaMessage(
+                                    conversationId = conversationId,
+                                    text = reply,
+                                    source = AiSource.PHONE,
+                                )
+                                reply to AiSource.PHONE
+                            } ?: ("" to AiSource.NONE)
+                        }
+                        geminiRepository != null -> {
+                            val messages = history.mapNotNull { msg ->
+                                when (msg.role) {
+                                    "user" -> GeminiRepository.GeminiMessage("user", msg.content)
+                                    "assistant" -> if (msg.content.isNotBlank()) {
+                                        GeminiRepository.GeminiMessage("assistant", msg.content)
+                                    } else null
+                                    else -> null
+                                }
+                            }
+                            if (messages.isEmpty()) "" to AiSource.NONE else {
+                                val reply = geminiRepository.chat(
+                                    messages = messages,
+                                    systemPrompt = PersonaPrompts.forVoice(),
+                                    maxTokens = 1024,
+                                )
+                                chatRepository.addMayaMessage(
+                                    conversationId = conversationId,
+                                    text = reply.text,
+                                    model = reply.model,
+                                    source = AiSource.CLOUD,
+                                )
+                                reply.text to AiSource.CLOUD
+                            }
+                        }
+                        else -> "" to AiSource.NONE
+                    }
                 }
-                val replyText = response.reply.trim()
-                chatRepository.addMayaMessage(
-                    conversationId = conversationId,
-                    text = replyText,
-                    model = response.model,
-                )
-                _state.update { it.copy(reply = replyText) }
-                speak(replyText)
+
+                val (replyText, replySource) = reply
+                if (replyText.isNotBlank()) {
+                    _state.update { it.copy(reply = replyText) }
+                    speak(replyText, replySource)
+                }
             } catch (_: Exception) {
                 _state.update {
                     it.copy(phase = VoicePhase.Error, errorResId = com.devaraj.maya.R.string.voice_error_generic)
@@ -266,19 +335,80 @@ class VoiceViewModel(
         }
     }
 
-    private fun speak(text: String) {
-        val clean = text.trim()
+    private fun buildVoicePrompt(history: List<ChatMessageDto>): String {
+        val sb = StringBuilder()
+        sb.append("You are Maya, a helpful personal AI assistant. Reply concisely in the same language as the user.\n\n")
+        for (msg in history) {
+            val role = if (msg.role == "user") "User" else "Maya"
+            sb.append("$role: ${msg.content}\n")
+        }
+        sb.append("Maya: ")
+        return sb.toString()
+    }
+
+    private fun speak(text: String, source: AiSource = AiSource.NONE) {
+        val clean = SpeechText.strip(text)
         if (clean.isBlank()) {
             _state.update { it.copy(phase = VoicePhase.Idle) }
             return
         }
+
+        // Gemini voice is used ONLY for Gemini (cloud) replies.
+        // Laptop and on-device replies keep the system TTS.
+        if (source == AiSource.CLOUD && geminiTts != null && geminiVoicePlayer != null) {
+            speakGemini(clean)
+            return
+        }
+
+        val usePiper = currentTtsEngine == "piper" && piperTts?.isLoaded == true
+
+        if (usePiper) {
+            _state.update { it.copy(phase = VoicePhase.Speaking, errorResId = null) }
+            val ok = piperTts?.speak(clean, currentTtsSpeed) ?: false
+            if (!ok) {
+                speakSystem(clean)
+            }
+            return
+        }
+
+        speakSystem(clean)
+    }
+
+    /**
+     * Speak a Gemini reply with the Gemini TTS voice. Any failure (offline,
+     * rate limit, missing key) falls back to the on-device system voice.
+     */
+    private fun speakGemini(text: String) {
+        _state.update { it.copy(phase = VoicePhase.Speaking, errorResId = null) }
+        viewModelScope.launch {
+            try {
+                val wav = geminiTts!!.synthesize(text)
+                val started = geminiVoicePlayer!!.play(
+                    wav = wav,
+                    onDone = {
+                        _state.update { s ->
+                            if (s.phase == VoicePhase.Speaking) s.copy(phase = VoicePhase.Idle) else s
+                        }
+                    },
+                    onError = {
+                        viewModelScope.launch { speakSystem(text) }
+                    },
+                )
+                if (!started) speakSystem(text)
+            } catch (_: Exception) {
+                speakSystem(text)
+            }
+        }
+    }
+
+    private fun speakSystem(text: String) {
         if (!ttsReady) {
-            pendingSpeak = clean
+            pendingSpeak = text
             _state.update { it.copy(phase = VoicePhase.Speaking) }
             return
         }
         _state.update { it.copy(phase = VoicePhase.Speaking, errorResId = null) }
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "maya-voice-reply")
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "maya-voice-reply")
     }
 
     fun clearError() {
@@ -289,6 +419,8 @@ class VoiceViewModel(
         try { speechRecognizer?.destroy() } catch (_: Exception) {}
         try { tts?.stop() } catch (_: Exception) {}
         try { tts?.shutdown() } catch (_: Exception) {}
+        piperTts?.shutdown()
+        geminiVoicePlayer?.release()
         super.onCleared()
     }
 
@@ -297,13 +429,23 @@ class VoiceViewModel(
         private val chatRepository: ChatRepository,
         private val connectionRepository: ConnectionRepository,
         private val apiClient: ApiClient,
+        private val settingsStore: SettingsStore,
+        private val piperTts: PiperTts?,
+        private val geminiRepository: GeminiRepository?,
+        private val onDeviceModel: OnDeviceModelManager?,
+        private val geminiTts: GeminiTtsRepository?,
+        private val geminiVoicePlayer: GeminiVoicePlayer?,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             require(modelClass.isAssignableFrom(VoiceViewModel::class.java)) {
                 "Unknown ViewModel: ${modelClass.name}"
             }
-            return VoiceViewModel(app, chatRepository, connectionRepository, apiClient) as T
+            return VoiceViewModel(
+                app, chatRepository, connectionRepository, apiClient,
+                settingsStore, piperTts, geminiRepository, onDeviceModel,
+                geminiTts, geminiVoicePlayer,
+            ) as T
         }
     }
 }

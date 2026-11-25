@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.devaraj.maya.BuildConfig
 import com.devaraj.maya.data.local.MayaDatabase
 import com.devaraj.maya.data.cloud.GeminiRepository
+import com.devaraj.maya.data.cloud.GeminiTtsRepository
 import com.devaraj.maya.data.model.OnDeviceModelManager
 import kotlinx.coroutines.flow.first
 import com.devaraj.maya.data.prefs.SettingsStore
@@ -17,6 +18,8 @@ import com.devaraj.maya.data.secure.DeviceIdentity
 import com.devaraj.maya.data.secure.TokenVault
 import com.devaraj.maya.data.wake.VoskModelStore
 import com.devaraj.maya.control.hybrid.HybridController
+import com.devaraj.maya.voice.GeminiVoicePlayer
+import com.devaraj.maya.voice.PiperTts
 
 /**
  * Manual dependency container (plan §7: no Hilt/Koin in v1).
@@ -61,6 +64,18 @@ class AppContainer(context: Context) {
             }
         })
     }
+
+    val piperTts: PiperTts? by lazy { PiperTts.create(appContext) }
+
+    val geminiTts: GeminiTtsRepository by lazy {
+        GeminiTtsRepository(apiKeyProvider = {
+            kotlinx.coroutines.runBlocking {
+                settingsStore.settings.first().geminiApiKey
+            }
+        })
+    }
+
+    val geminiVoicePlayer: GeminiVoicePlayer by lazy { GeminiVoicePlayer(appContext) }
 
     val voskModel: VoskModelStore by lazy { VoskModelStore(appContext) }
 

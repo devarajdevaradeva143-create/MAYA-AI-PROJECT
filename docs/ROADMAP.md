@@ -14,7 +14,7 @@
 | 5 | Tools hardening: monitor loop, knowledge index, assistant | coder, database, tester | ✅ Done |
 | 6 | Security: PIN (biometrics moved to Phase 11) | security, coder, tester | ✅ Done |
 | 7 | Voice: Piper TTS + STT + wake word | coder, tester | ✅ Done (Tamil awaits models) |
-| 8 | OS layer: Windows tray, Fedora systemd, docs, final audit | coder, documentation, security, bug-hunter, reviewer | ✅ Done (Fedora untested) |
+| 8 | OS layer: Windows tray, docs, final audit | coder, documentation, security, bug-hunter, reviewer | ✅ Done |
 | 9 | Cloud: Gemini as a separate, opt-in command | coder, security, tester | ✅ Done (live key pending) |
 | 10 | Knowledge RAG: BM25 + semantic embeddings | coder, tester, documentation | ✅ Done |
 | 11 | Biometrics: Hello face + voice phrase/voiceprint + session unlock | security, coder, tester | ✅ Done |
@@ -136,11 +136,10 @@ Details, commands and troubleshooting: `docs/VOICE.md`.
 ## Phase 8 — OS layer + polish
 
 - Windows: tray app, autostart (Task Scheduler)
-- Fedora: systemd user service
 - `MAYA AI/scripts/` launchers
 - Final: security audit, bug hunt, review, docs (`UPDATE.md`, setup guide, troubleshooting)
 
-**Exit criteria:** starts on login both OS · full test + security report clean.
+**Exit criteria:** starts on login · full test + security report clean.
 
 ---
 
@@ -251,8 +250,7 @@ Details: `docs/DEVICES.md`.
 
 - `custom/tools/watchdog.py` + `maya security watchdog`
 - Foreground, command-driven loop; Maya never starts it by itself
-- **Idle auto-lock** — Windows `GetLastInputInfo`; Fedora X11 `xprintidle`;
-  Wayland reports idle detection unavailable
+- **Idle auto-lock** — Windows `GetLastInputInfo`; Wayland reports idle detection unavailable
 - **Session expiry** — optional lock N minutes after the last successful unlock
 - **Voice re-check** — optional periodic challenge using the enrolled phrase +
   voiceprint; skipped (not failed) without enrollment/model; failures lock and

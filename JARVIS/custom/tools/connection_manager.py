@@ -7,7 +7,7 @@ Manages four connection types used by Maya AI (spec: docs/REQUIREMENTS.md §11):
     3. Bluetooth
     4. Internet
 
-Responsibilities (laptop side, Windows + Fedora):
+Responsibilities (laptop side, Windows):
     - Discover available connections.
     - Check connection status (connected, ssid/name, ip, signal, latency).
     - Connect / disconnect securely.
@@ -21,7 +21,7 @@ device without an explicit user action (pairing handled by devices.py).
 
 Design:
     - Backends are injectable (see `Backend` protocol) so the same code runs
-      on Windows, Fedora, and in tests (MockBackend).
+      on Windows, and in tests (MockBackend).
     - `SystemBackend` is the default and uses psutil + OS commands.
     - All blocking OS calls go through the backend; the manager itself is
       pure logic + retry + events.

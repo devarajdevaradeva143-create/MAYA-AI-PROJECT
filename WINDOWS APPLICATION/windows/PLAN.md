@@ -47,4 +47,4 @@
 | **11** | Packaging + docs: PyInstaller build, README/HANDOFF update | ✅ |
 | **12** | Phone Remote: PhoneRemotePage (screen view, input controls, file browser), WebSocket client for screen stream, session start/stop with phone confirm, Settings toggle | 🔄 Planned |
 
-**Author:** Vera AI (Nemotron 3.5 Lightning Free) — local-first personal AI assistant for Windows + Fedora.
+**Author:** Vera AI (Nemotron 3.5 Lightning Free) — local-first personal AI assistant for Windows.

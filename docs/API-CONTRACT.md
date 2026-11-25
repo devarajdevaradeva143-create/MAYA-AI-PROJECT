@@ -6,7 +6,7 @@
 
 **Status:** Design locked (v1) — implementation innum illa.
 **Owner files:**
-- Server: `JARVIS\custom\server\` (Windows + Fedora share)
+- Server: `JARVIS\custom\server\` (Windows)
 - Client: `MOBILE APP\app\src\main\java\com\devaraj\maya\data\remote\`
 - Plans: `MOBILE APPLICATION\PLAN.md`, `WINDOWS APPLICATION\windows\PLAN.md`
 

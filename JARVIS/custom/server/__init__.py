@@ -1,4 +1,4 @@
-"""Maya phone server (shared Windows + Fedora, headless).
+"""Maya phone server (Windows, headless).
 
 `custom.server` must never import PySide6. See docs/API-CONTRACT.md.
 """

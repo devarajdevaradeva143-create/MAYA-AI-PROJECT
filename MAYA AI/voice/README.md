@@ -29,12 +29,3 @@ voice/
 
 Piper first `.onnx` file-a (alphabetical) eduthukkum. So oru folder-la
 **oru voice mattum** vachuko — spare voices `candidates/`-la podu.
-
-## Windows vs Fedora — voice change aaguma?
-
-**Voice file (.onnx) = same** — rendu OS-layum work aagum ✅
-**Piper binary mattum vera:**
-- Windows → `piper.exe`
-- Fedora → `piper` (Linux binary)
-
-Kuyil rendu OS-layum Python package (torch CPU) — same model file.
