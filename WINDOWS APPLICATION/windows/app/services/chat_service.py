@@ -42,8 +42,12 @@ class ChatService:
         history_path: Path | str | None = None,
         persona_loader: Callable[[str], str] | None = None,
         intelligence: Any | None = None,
+        cloud: Any | None = None,
+        settings: Any | None = None,
     ) -> None:
         self._engine = engine
+        self._cloud = cloud
+        self._settings = settings
         self._history = ChatHistory(history_path)
         self._loader = persona_loader or load_persona
         self._lock = threading.RLock()
@@ -75,6 +79,41 @@ class ChatService:
     @property
     def model(self) -> str:
         return str(getattr(self._engine, "model", "") or "")
+
+    # -- cloud (Gemini) -----------------------------------------------
+
+    @property
+    def engine_enabled(self) -> bool:
+        """`engine.enabled` in settings.yaml (defaults to true)."""
+        if self._settings is None:
+            return True
+        try:
+            return bool(self._settings.get("engine.enabled", True))
+        except Exception:  # noqa: BLE001 - a broken config must not block chat
+            return True
+
+    def _require_local_engine(self) -> None:
+        if not self.engine_enabled:
+            raise ChatError("Lemonade (local engine) is turned off in Settings → AI Engine.")
+
+    @property
+    def cloud_available(self) -> bool:
+        """True when a key is saved and `cloud.enabled` is not false."""
+        return bool(getattr(self._cloud, "available", False))
+
+    @property
+    def cloud_enabled(self) -> bool:
+        """`cloud.enabled` in settings.yaml (defaults to true)."""
+        return bool(getattr(self._cloud, "enabled", True))
+
+    @property
+    def cloud_configured(self) -> bool:
+        """A Gemini key is stored in `.env` / the environment."""
+        return bool(getattr(self._cloud, "configured", False))
+
+    @property
+    def cloud_model(self) -> str:
+        return str(getattr(self._cloud, "model", "") or "")
 
     @staticmethod
     def _key_for(history_name: str) -> str:
@@ -153,6 +192,7 @@ class ChatService:
     def send(self, text: str) -> str:
         """Non-streaming call (used by tests/tools)."""
         cleaned = self._prepare(text)
+        self._require_local_engine()
         if self._intelligence is not None:
             reply = self._intelligence.chat(cleaned)
             reply = str(reply).strip()
@@ -171,6 +211,7 @@ class ChatService:
     def stream(self, text: str) -> Iterator[str]:
         """Yield chunks; history is saved only when the reply finishes."""
         cleaned = self._prepare(text)
+        self._require_local_engine()
         if self._intelligence is not None:
             reply = self._intelligence.chat(cleaned)
             reply = str(reply).strip()
@@ -193,6 +234,27 @@ class ChatService:
         if self._cancel.is_set():
             return
         reply = "".join(parts).strip()
+        if reply:
+            self._record(cleaned, reply)
+
+    def stream_cloud(self, text: str) -> Iterator[str]:
+        """Explicit cloud reply: only this message leaves the laptop.
+
+        The user must have confirmed in the UI — this method sends right away,
+        so offline history is deliberately not attached.
+        """
+        cleaned = self._prepare(text)
+        if self._cloud is None:
+            raise ChatError("Cloud AI is not configured")
+        with self._lock:
+            self._cancel.clear()
+        reply = ""
+        for chunk in self._cloud.chat_stream(cleaned):
+            if self._cancel.is_set():
+                return
+            reply += str(chunk)
+            yield str(chunk)
+        reply = reply.strip()
         if reply:
             self._record(cleaned, reply)
 

@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from app.services import autostart_service
 from app.services.bluetooth_remote_client import reset_bluetooth_client
+from app.services.cloud_service import CloudAdapter
 from app.services.phone_remote_client import reset_phone_remote_client
 from app.services.server_service import shared_server_service
 from app.services.wan_remote_client import reset_wan_client
@@ -35,6 +38,21 @@ from app.ui.theme import MODES, ThemeManager
 from app.ui.workers import ServerStartWorker
 
 logger = logging.getLogger("maya.ui.settings")
+
+
+def _flag(value: Any, default: bool = True) -> bool:
+    """Read a boolean setting, even when the YAML holds a quoted string."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "on", "1"}:
+            return True
+        if lowered in {"false", "no", "off", "0"}:
+            return False
+    return default
 
 
 def _card(title: str, hint: str = "") -> tuple[QFrame, QVBoxLayout]:
@@ -67,10 +85,12 @@ class SettingsPage(QScrollArea):
         theme: ThemeManager | None = None,
         *,
         server_factory: Callable[[], Any] | None = None,
+        cloud: Any | None = None,
     ) -> None:
         super().__init__()
         self._repository = repository
         self._theme = theme
+        self._cloud = cloud or CloudAdapter()
         self._server_factory = server_factory or shared_server_service
         self._server_start_worker: ServerStartWorker | None = None
         self.setWidgetResizable(True)
@@ -82,6 +102,7 @@ class SettingsPage(QScrollArea):
         self._layout.setContentsMargins(24, 20, 24, 24)
         self._layout.setSpacing(16)
 
+        self._build_engines()
         self._build_appearance()
         self._build_startup()
         self._build_phone_remote()
@@ -141,6 +162,213 @@ class SettingsPage(QScrollArea):
         self._autostart.setChecked(autostart_service.is_autostart_enabled())
         if not ok:
             self._autostart.setToolTip("Could not update the Windows startup entry.")
+
+    # -- AI engine (local + cloud) -------------------------------------
+    @staticmethod
+    def _make_switch(checked: bool) -> QPushButton:
+        """A small On/Off push button used by the engine switches."""
+        button = QPushButton()
+        button.setCheckable(True)
+        button.setChecked(checked)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setFixedSize(76, 32)
+        SettingsPage._paint_switch(button, checked)
+        return button
+
+    @staticmethod
+    def _paint_switch(button: QPushButton, checked: bool) -> None:
+        button.setText("On" if checked else "Off")
+        button.setObjectName("switchOn" if checked else "switchOff")
+        button.setToolTip("On — click to switch off" if checked else "Off — click to switch on")
+        button.style().unpolish(button)
+        button.style().polish(button)
+
+    def _build_engines(self) -> None:
+        card, layout = _card(
+            "AI Engine",
+            "Pick who answers. Lemonade runs on this laptop. When Lemonade is off "
+            "(or fails) Gemini answers instead — no extra click. Switch either "
+            "on or off; use whichever you prefer.",
+        )
+
+        local_row = QHBoxLayout()
+        local_row.setSpacing(12)
+        local_label = QLabel("Lemonade (local engine)")
+        local_label.setMinimumWidth(180)
+        self._engine_status = QLabel("Status: —")
+        self._engine_status.setObjectName("emptyHint")
+        self._engine_status.setWordWrap(True)
+        self._engine_enable = self._make_switch(_flag(self._repository.get("engine.enabled", True)))
+        self._engine_enable.toggled.connect(self._on_engine_toggled)
+        local_row.addWidget(local_label)
+        local_row.addWidget(self._engine_status, 1)
+        local_row.addWidget(self._engine_enable)
+        layout.addLayout(local_row)
+
+        cloud_row = QHBoxLayout()
+        cloud_row.setSpacing(12)
+        cloud_label = QLabel("Gemini (cloud AI)")
+        cloud_label.setMinimumWidth(180)
+        self._cloud_status = QLabel("Status: —")
+        self._cloud_status.setObjectName("emptyHint")
+        self._cloud_status.setWordWrap(True)
+        self._cloud_enable = self._make_switch(_flag(self._repository.get("cloud.enabled", True)))
+        self._cloud_enable.toggled.connect(self._on_cloud_toggled)
+        cloud_row.addWidget(cloud_label)
+        cloud_row.addWidget(self._cloud_status, 1)
+        cloud_row.addWidget(self._cloud_enable)
+        layout.addLayout(cloud_row)
+
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
+        key_label = QLabel("API key")
+        key_label.setMinimumWidth(160)
+        self._cloud_key_input = QLineEdit()
+        self._cloud_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._cloud_key_input.setPlaceholderText("Paste a Gemini API key (AIza…)")
+        self._cloud_key_button = QPushButton("Save key")
+        self._cloud_key_button.setFixedHeight(32)
+        self._cloud_key_button.clicked.connect(self._on_cloud_key_save)
+        key_row.addWidget(key_label)
+        key_row.addWidget(self._cloud_key_input, 1)
+        key_row.addWidget(self._cloud_key_button)
+        layout.addLayout(key_row)
+
+        prompt_label = QLabel("Gemini prompt")
+        prompt_label.setMinimumWidth(160)
+        prompt_row = QHBoxLayout()
+        prompt_row.setSpacing(8)
+        self._cloud_prompt_input = QPlainTextEdit()
+        self._cloud_prompt_input.setPlaceholderText(
+            "Instruction sent with every Gemini request (empty = Gemini's default)."
+        )
+        self._cloud_prompt_input.setFixedHeight(76)
+        self._cloud_prompt_save = QPushButton("Save prompt")
+        self._cloud_prompt_save.setFixedHeight(32)
+        self._cloud_prompt_save.clicked.connect(self._on_cloud_prompt_save)
+        prompt_row.addWidget(prompt_label)
+        prompt_row.addWidget(self._cloud_prompt_input, 1)
+        prompt_row.addWidget(self._cloud_prompt_save)
+        layout.addLayout(prompt_row)
+
+        hint = QLabel(
+            'Get a key: <a href="https://aistudio.google.com/app/apikey">'
+            "aistudio.google.com/app/apikey</a>"
+        )
+        hint.setOpenExternalLinks(True)
+        hint.setObjectName("emptyHint")
+        layout.addWidget(hint)
+
+        self._layout.addWidget(card)
+
+    def _on_engine_toggled(self, checked: bool) -> None:
+        try:
+            self._repository.update({"engine.enabled": bool(checked)})
+        except SettingsError as exc:
+            self._revert_switch(self._engine_enable, not checked)
+            self._engine_status.setText(f"Status: Error — {exc}")
+            return
+        self._paint_switch(self._engine_enable, checked)
+        self._refresh_engine_state()
+        self._sync_switch_hint()
+        self.settings_saved.emit({"engine.enabled": bool(checked)})
+
+    @staticmethod
+    def _revert_switch(button: QPushButton, checked: bool) -> None:
+        """Put the switch back when the setting could not be written."""
+        button.blockSignals(True)
+        button.setChecked(checked)
+        button.blockSignals(False)
+        SettingsPage._paint_switch(button, checked)
+
+    def _refresh_engine_state(self) -> None:
+        enabled = _flag(self._repository.get("engine.enabled", True))
+        self._engine_enable.blockSignals(True)
+        self._engine_enable.setChecked(enabled)
+        self._engine_enable.blockSignals(False)
+        self._paint_switch(self._engine_enable, enabled)
+        if not enabled:
+            if self._cloud_off():
+                self._engine_status.setText(
+                    "Status: Off — Gemini is off too, so chat cannot answer. Turn one on."
+                )
+            else:
+                self._engine_status.setText("Status: Off — chat answers with Gemini (cloud).")
+            return
+        host = str(self._repository.get("engine.host", "") or "localhost")
+        model = str(self._repository.get("engine.model", "") or "")
+        detail = f" · {model}" if model else ""
+        self._engine_status.setText(f"Status: On · {host}{detail}")
+
+    def _on_cloud_toggled(self, checked: bool) -> None:
+        try:
+            self._repository.update({"cloud.enabled": bool(checked)})
+        except SettingsError as exc:
+            self._revert_switch(self._cloud_enable, not checked)
+            self._cloud_status.setText(f"Status: Error — {exc}")
+            return
+        self._paint_switch(self._cloud_enable, checked)
+        self._refresh_cloud_state()
+        self._sync_switch_hint()
+        self.settings_saved.emit({"cloud.enabled": bool(checked)})
+
+    def _sync_switch_hint(self) -> None:
+        """Point at the abandoned engine when both switches are off."""
+        if not self._cloud_off():
+            return
+        self._refresh_engine_state()
+
+    def _on_cloud_key_save(self) -> None:
+        key = self._cloud_key_input.text().strip()
+        if not key:
+            self._cloud_status.setText("Status: Enter a key first.")
+            return
+        result = self._cloud.save_api_key(key)
+        if not result.get("ok"):
+            self._cloud_status.setText(f"Status: Error — {result.get('error') or 'key not saved'}")
+            return
+        self._cloud_key_input.clear()
+        self._refresh_cloud_state()
+        self._cloud_status.setText("Status: Key saved to .env (value never shown).")
+
+    def _on_cloud_prompt_save(self) -> None:
+        prompt = self._cloud_prompt_input.toPlainText().strip()
+        try:
+            self._repository.update({"cloud.system_prompt": prompt})
+        except SettingsError as exc:
+            self._cloud_status.setText(f"Status: Error — {exc}")
+            return
+        self._refresh_cloud_state()
+        self._cloud_status.setText(
+            "Status: Prompt saved." if prompt else "Status: Prompt cleared — Gemini's default is used."
+        )
+        self.settings_saved.emit({"cloud.system_prompt": prompt})
+
+    def _cloud_off(self) -> bool:
+        try:
+            return not _flag(self._repository.get("cloud.enabled", True))
+        except Exception:  # noqa: BLE001 - a broken config must not block the page
+            return False
+
+    def _refresh_cloud_state(self) -> None:
+        status = self._cloud.status()
+        # The page owns the switch; the adapter only reports key/model state.
+        enabled = _flag(self._repository.get("cloud.enabled", True))
+        self._cloud_enable.blockSignals(True)
+        self._cloud_enable.setChecked(enabled)
+        self._cloud_enable.blockSignals(False)
+        self._paint_switch(self._cloud_enable, enabled)
+        if not enabled:
+            self._cloud_status.setText("Status: Disabled — Gemini will not answer.")
+            return
+        if not status.get("configured"):
+            self._cloud_status.setText("Status: No API key saved — paste one above.")
+            return
+        preview = status.get("key_preview") or ""
+        model = status.get("model") or ""
+        self._cloud_status.setText(
+            f"Status: Ready · key {preview or 'saved'} · model {model}"
+        )
 
     # -- phone server -------------------------------------------------
     def _build_server(self) -> None:
@@ -351,6 +579,8 @@ class SettingsPage(QScrollArea):
     # -- phone server -------------------------------------------------
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt signature
+        self._refresh_engine_state()
+        self._refresh_cloud_state()
         self._refresh_server_state()
         super().showEvent(event)
 
@@ -526,6 +756,11 @@ class SettingsPage(QScrollArea):
             bool(self._repository.get("ui.minimize_to_tray", True))
         )
         self._start_minimized.setChecked(bool(self._repository.get("ui.start_minimized", False)))
+        self._refresh_engine_state()
+        self._refresh_cloud_state()
+        stored_prompt = str(self._repository.get("cloud.system_prompt", "") or "")
+        if self._cloud_prompt_input.toPlainText().strip() != stored_prompt.strip():
+            self._cloud_prompt_input.setPlainText(stored_prompt)
         self._refresh_phone_remote_state()
         self._refresh_bluetooth_remote_state()
         self._refresh_wan_remote_state()

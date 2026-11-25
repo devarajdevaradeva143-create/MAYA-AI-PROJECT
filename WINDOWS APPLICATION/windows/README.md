@@ -22,7 +22,8 @@ docs\API-CONTRACT.md
 ## Status
 
 Build complete — all 7 pages wired (chat, voice, pc, monitor, teacher, security, settings).
-243 tests pass (1 skipped), ruff clean. `dist\mayaai.exe` built.
+243 tests pass (1 skipped), ruff clean. One-folder build at `dist\mayaai\mayaai.exe`
+(folder build = no per-launch `%TEMP%` extraction, opens in ~2 s instead of ~18 s).
 
 ### Implemented
 - Chat: streaming, Stop, Retry, persona switch, history persistence
@@ -38,12 +39,13 @@ Build complete — all 7 pages wired (chat, voice, pc, monitor, teacher, securit
 ### Run (packaged)
 
 ```
-Desktop\Maya AI.lnk   ->   dist\mayaai.exe
+Desktop\Maya AI.lnk   ->   dist\mayaai\mayaai.exe
 ```
 
-The exe locates `MAYA AI\` from its own folder (or `MAYA_AI_HOME`), so the
-shortcut works without setting any environment variable. See
-`docs\WINDOWS-APP.md` for the resolution order.
+Point the shortcut at `dist\mayaai\mayaai.exe` (not the old `dist\mayaai.exe`,
+which no longer exists). The exe locates `MAYA AI\` from its own folder (or
+`MAYA_AI_HOME`), so the shortcut works without setting any environment
+variable. See `docs\WINDOWS-APP.md` for the resolution order.
 
 ### Run
 

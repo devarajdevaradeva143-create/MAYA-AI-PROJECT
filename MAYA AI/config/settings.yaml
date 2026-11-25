@@ -34,6 +34,7 @@ persona: persona/girlfriend.md
 
 # engine — inference backend (lemonade / openjarvis). Code reads this; never hardcode.
 engine:
+  enabled: false        # Settings → AI Engine switch (off = local chat paused)
   mode: direct          # direct | openjarvis
   type: lemonade        # lemonade | ollama (not installed)
   host: http://localhost:13305
@@ -196,6 +197,10 @@ cloud:
   temperature: 0.7
   max_tokens: 1024
   require_confirmation: true
+  # Sent as Gemini's system instruction on every cloud request.
+  # Editable in Settings → AI Engine → "Gemini prompt". Empty = Gemini default.
+  system_prompt: >-
+    your name is deva
 
 # phone server — LAN only, no cloud relay
 server:
@@ -224,7 +229,7 @@ ui:
   theme: system          # dark | light | system
   window_width: 1180
   window_height: 760
-  minimize_to_tray: true
+  minimize_to_tray: false
   close_to_tray: true
   start_minimized: false
   confirm_destructive: true

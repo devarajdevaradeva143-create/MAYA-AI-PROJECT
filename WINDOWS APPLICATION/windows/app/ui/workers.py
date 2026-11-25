@@ -21,15 +21,28 @@ class ChatStreamWorker(QThread):
     cancelled = Signal()
     failed = Signal(str, str)  # error type, message
 
-    def __init__(self, chat: ChatService, text: str, parent: Any = None) -> None:
+    def __init__(
+        self,
+        chat: ChatService,
+        text: str,
+        parent: Any = None,
+        *,
+        cloud: bool = False,
+    ) -> None:
         super().__init__(parent)
         self._chat = chat
         self._text = text
+        self._cloud = cloud
 
     def run(self) -> None:
         parts: list[str] = []
         try:
-            for piece in self._chat.stream(self._text):
+            chunks = (
+                self._chat.stream_cloud(self._text)
+                if self._cloud
+                else self._chat.stream(self._text)
+            )
+            for piece in chunks:
                 parts.append(piece)
                 self.chunk.emit(piece)
         except Exception as exc:  # noqa: BLE001 - surfaced to the page

@@ -40,7 +40,7 @@ def repo(tmp_path: Path) -> SettingsRepository:
 
 @pytest.fixture
 def window(qtbot, repo: SettingsRepository, tmp_path: Path) -> MayaMainWindow:
-    chat = ChatService(FakeEngine(), tmp_path / "chat_history.json")
+    chat = ChatService(FakeEngine(), tmp_path / "chat_history.json", settings=repo)
     theme = ThemeManager(QApplication.instance(), "dark")
     win = MayaMainWindow(repository=repo, theme=theme, chat=chat)
     qtbot.addWidget(win)
@@ -103,6 +103,19 @@ def test_window_uses_saved_size(qtbot, tmp_path: Path) -> None:
 
     assert win.width() >= 1280
     assert win.height() >= 700
+
+
+def test_engine_switch_refreshes_open_chat_page(
+    qtbot, window: MayaMainWindow, repo: SettingsRepository
+) -> None:
+    window.navigate("chat")
+    settings = window.page("settings")
+
+    qtbot.mouseClick(settings._engine_enable, Qt.MouseButton.LeftButton)
+
+    assert repo.get("engine.enabled") is False
+    assert window.status_text == "Lemonade off"
+    assert settings._engine_status.text().startswith("Status: Off")
 
 
 def test_settings_save_writes_yaml_and_backup(qtbot, window: MayaMainWindow, repo: SettingsRepository) -> None:

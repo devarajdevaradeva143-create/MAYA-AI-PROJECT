@@ -45,6 +45,11 @@ def _cloud_cfg() -> dict[str, Any]:
     return cfg if isinstance(cfg, dict) else {}
 
 
+def enabled() -> bool:
+    """True unless `cloud.enabled: false` is set in settings.yaml."""
+    return _cloud_cfg().get("enabled") is not False
+
+
 def _env_file_path() -> Path:
     override = os.environ.get("MAYA_ENV_FILE", "").strip()
     return Path(override).expanduser() if override else PROJECT_ROOT / ".env"

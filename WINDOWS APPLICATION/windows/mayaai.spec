@@ -20,6 +20,8 @@ a = Analysis(
         'maya_intelligence.language', 'maya_intelligence.adapters',
         'maya_intelligence.engines', 'maya_intelligence.engines.skills',
         'maya_intelligence.memory', 'maya_intelligence.config',
+        'numpy', 'numpy._core', 'numpy._core._exceptions', 'numpy._core._multiarray_umath',
+        'numpy._core.multiarray', 'numpy.core', 'numpy.core.multiarray',
     ],
     hookspath=[],
     hooksconfig={},
@@ -33,14 +35,13 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='mayaai',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -49,4 +50,15 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+# One-folder build: no per-launch extraction to %TEMP%, so the app opens fast.
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='mayaai',
 )

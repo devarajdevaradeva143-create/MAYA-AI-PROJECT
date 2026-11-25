@@ -187,11 +187,10 @@ def test_ws_stream_start_token_done(tmp_path) -> None:
         second = socket.receive_json()
         done = socket.receive_json()
 
-    assert start == {
-        "type": "start",
-        "conversation_id": "c_01TEST",
-        "model": "qwen3-3b",
-    }
+    assert start["type"] == "start"
+    assert start["conversation_id"] == "c_01TEST"
+    # The server reports whatever model the services were built with.
+    assert start["model"] == harness.services.model
     assert first == {"type": "token", "text": "Van"}
     assert second == {"type": "token", "text": "akkam"}
     assert done["type"] == "done"

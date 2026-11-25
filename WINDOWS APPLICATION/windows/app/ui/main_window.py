@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from app.main import APP_TITLE, DEFAULT_HEIGHT, DEFAULT_WIDTH
 from app.services.chat_service import ChatService
+from app.services.cloud_service import CloudAdapter
 from app.services.control_service import ControlService
 from app.services.engine_service import EngineAdapter
 from app.services.security_service import SecurityService
@@ -77,7 +78,10 @@ class MayaMainWindow(QMainWindow):
         super().__init__(parent)
         self._repository = repository or SettingsRepository()
         self._chat = chat or ChatService(
-            EngineAdapter(), intelligence=_make_intelligence_bridge(),
+            EngineAdapter(),
+            intelligence=_make_intelligence_bridge(),
+            cloud=CloudAdapter(settings=self._repository),
+            settings=self._repository,
         )
         self._voice_adapter = VoiceAdapter()
         self._wake_adapter = WakeAdapter()
@@ -174,6 +178,7 @@ class MayaMainWindow(QMainWindow):
         elif key == "settings":
             page = SettingsPage(self._repository, theme=self._theme)
             page.theme_changed.connect(self._on_theme_changed)
+            page.settings_saved.connect(self._on_settings_saved)
         elif key == "voice":
             page = VoicePage(
                 voice=self._voice_adapter,
@@ -216,7 +221,7 @@ class MayaMainWindow(QMainWindow):
             event.type() == QEvent.Type.WindowStateChange
             and self.isMinimized()
             and self._tray_available
-            and bool(self._repository.get("ui.minimize_to_tray", True))
+            and bool(self._repository.get("ui.minimize_to_tray", False))
         ):
             event.ignore()
             self.hide()
@@ -272,3 +277,15 @@ class MayaMainWindow(QMainWindow):
     def _on_theme_changed(self, mode: str) -> None:
         if self._theme is not None:
             self._theme.apply(mode)
+
+    def _on_settings_saved(self, changes: dict) -> None:
+        """A switch changed: make the open chat page re-read engine state."""
+        if not any(key.startswith(("engine.", "cloud.")) for key in changes):
+            return
+        index = self._pages.get("chat")
+        if index is None:
+            return
+        chat = self.stack.widget(index)
+        refresh = getattr(chat, "refresh_health", None)
+        if callable(refresh):
+            refresh()

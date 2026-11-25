@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 
 from app.services.chat_service import ChatService
 from app.ui.pages.chat_page import ChatPage
+from app.ui.widgets.message_bubble import MessageBubble
 from tests.fakes import FakeEngine
 
 
@@ -63,6 +64,35 @@ def test_send_streams_reply_into_bubbles(qtbot, tmp_path) -> None:
     qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
     assert page.bubbles() == [("user", "hi"), ("assistant", "Vanakkam")]
     assert page.composer.toPlainText() == ""
+
+
+def test_reply_says_who_answered(qtbot, tmp_path) -> None:
+    page = _page(qtbot, tmp_path)
+
+    page.composer.setPlainText("hi")
+    page.send_button.click()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    labels = [row.findChild(MessageBubble).source for row in page._rows]
+    assert labels == ["", "Lemonade (local)"]
+    assert "Lemonade" in page._model_label.text()
+
+
+def test_cloud_reply_says_gemini_answered(qtbot, tmp_path) -> None:
+    page = _page(
+        qtbot,
+        tmp_path,
+        cloud=FakeCloud(),
+        settings=FakeSettings(**{"engine.enabled": False}),
+    )
+
+    page.composer.setPlainText("hi")
+    page.send()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    labels = [row.findChild(MessageBubble).source for row in page._rows]
+    assert labels == ["", "Gemini (cloud)"]
+    assert "Gemini" in page._model_label.text()
 
 
 def test_empty_input_does_nothing(qtbot, tmp_path) -> None:
@@ -164,6 +194,146 @@ def test_health_success_sets_model_label(qtbot, tmp_path) -> None:
 
     qtbot.waitUntil(lambda: page._model_label.text() == "qwen3.5-2b-FLM", timeout=5000)
     assert page.banner_text == ""
+
+
+class FakeCloud:
+    """Cloud stand-in for the Gemini fallback (no network)."""
+
+    def __init__(self, reply: str = "cloud answer") -> None:
+        self.reply = reply
+        self.available = True
+        self.model = "gemini-3.5-flash-lite"
+        self.sent: list[str] = []
+
+    def chat_stream(self, text: str):
+        self.sent.append(text)
+        yield self.reply
+
+
+def test_engine_failure_sends_to_gemini_directly(qtbot, tmp_path) -> None:
+    cloud = FakeCloud()
+    page = _page(qtbot, tmp_path, FlakyEngine(), cloud=cloud)
+
+    page.composer.setPlainText("hi")
+    page.send()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    # Local engine failed: Gemini answers at once, no per-message click.
+    assert cloud.sent == ["hi"]  # only the typed message leaves the laptop
+    assert page.bubbles() == [("user", "hi"), ("assistant", "cloud answer")]
+    assert "lemonade failed" in page.banner_text.lower()
+    assert "Only your message was sent" in page.banner_text
+    assert page.chat.messages()[-1] == {"role": "assistant", "content": "cloud answer"}
+
+
+def test_empty_reply_does_not_leave_thinking_placeholder(qtbot, tmp_path) -> None:
+    page = _page(qtbot, tmp_path, FakeEngine(chunks=[]))
+
+    page.composer.setPlainText("hi")
+    page.send()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    assert page.bubbles() == [("user", "hi")]
+    assert "empty reply" in page.banner_text.lower()
+
+
+def test_local_failure_keeps_only_the_gemini_reply(qtbot, tmp_path) -> None:
+    class HalfEngine(FakeEngine):
+        def chat_stream(self, messages):
+            del messages
+            yield "half"
+            raise RuntimeError("connection lost")
+
+    page = _page(qtbot, tmp_path, HalfEngine(chunks=[]), cloud=FakeCloud())
+
+    page.composer.setPlainText("hi")
+    page.send()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    assert page.bubbles() == [("user", "hi"), ("assistant", "cloud answer")]
+    labels = [row.findChild(MessageBubble).source for row in page._rows]
+    assert labels == ["", "Gemini (cloud)"]
+
+
+def test_engine_failure_without_cloud_shows_engine_error(qtbot, tmp_path) -> None:
+    page = _page(qtbot, tmp_path, FlakyEngine())
+
+    page.composer.setPlainText("hi")
+    page.send()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    assert "gemini" not in page.banner_text.lower()
+    assert "engine" in page.banner_text.lower()
+
+
+class FakeSettings:
+    """Settings stand-in exposing `.get` (engine switch tests)."""
+
+    def __init__(self, **values) -> None:
+        self.values = values
+
+    def get(self, key: str, default=None):
+        return self.values.get(key, default)
+
+
+def test_local_engine_off_sends_to_gemini_directly(qtbot, tmp_path) -> None:
+    cloud = FakeCloud()
+    page = _page(
+        qtbot,
+        tmp_path,
+        cloud=cloud,
+        settings=FakeSettings(**{"engine.enabled": False}),
+    )
+
+    page.composer.setPlainText("hi")
+    page.send()
+    qtbot.waitUntil(lambda: not page.is_generating, timeout=5000)
+
+    # No per-message permission: Gemini is called straight away.
+    assert cloud.sent == ["hi"]
+    assert page.bubbles() == [("user", "hi"), ("assistant", "cloud answer")]
+    assert "lemonade is off" in page.banner_text.lower()
+    assert "only your message was sent" in page.banner_text.lower()
+
+
+def test_local_engine_off_without_cloud_points_to_settings(qtbot, tmp_path) -> None:
+    page = _page(qtbot, tmp_path, settings=FakeSettings(**{"engine.enabled": False}))
+
+    page.composer.setPlainText("hi")
+    page.send()
+
+    assert not page.is_generating
+    assert "settings" in page.banner_text.lower()
+
+
+def test_engine_off_names_switched_off_gemini(qtbot, tmp_path) -> None:
+    cloud = FakeCloud()
+    cloud.available = False
+    cloud.enabled = False
+    cloud.configured = True
+    page = _page(
+        qtbot,
+        tmp_path,
+        cloud=cloud,
+        settings=FakeSettings(**{"engine.enabled": False}),
+    )
+
+    page.composer.setPlainText("hi")
+    page.send()
+
+    assert "switched off" in page.banner_text.lower()
+    assert "key" not in page.banner_text.lower()
+
+
+def test_stale_health_probe_is_ignored_after_switch_off(qtbot, tmp_path) -> None:
+    settings = FakeSettings(**{"engine.enabled": True})
+    page = _page(qtbot, tmp_path, settings=settings)
+
+    settings.values["engine.enabled"] = False
+    page._on_health(True, "", "qwen3.5-2b-FLM")
+
+    assert "qwen" not in page._model_label.text()
+    assert page._model_label.text() == "Lemonade off"
 
 
 def test_history_loads_on_open(qtbot, tmp_path) -> None:

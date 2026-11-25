@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.chat_service import MAX_INPUT_CHARS, ChatService
+from app.services.chat_service import MAX_INPUT_CHARS, ChatError, ChatService
 from tests.fakes import FakeEngine
 
 
@@ -24,6 +24,28 @@ class RecordingEngine(FakeEngine):
     def chat_stream(self, messages):
         self.calls.append([dict(item) for item in messages])
         yield from super().chat_stream(messages)
+
+
+class FakeCloud:
+    """Cloud adapter stand-in: records what was sent, never touches the net."""
+
+    def __init__(
+        self,
+        reply: str = "Cloud reply",
+        available: bool = True,
+        error: Exception | None = None,
+    ) -> None:
+        self.reply = reply
+        self.available = available
+        self.error = error
+        self.model = "gemini-3.5-flash-lite"
+        self.sent: list[str] = []
+
+    def chat_stream(self, text: str):
+        self.sent.append(text)
+        if self.error:
+            raise self.error
+        yield self.reply
 
 
 class HookEngine:
@@ -141,6 +163,73 @@ def test_long_input_is_rejected(tmp_path) -> None:
 
     with pytest.raises(Exception, match="longer than"):
         service.send("x" * (MAX_INPUT_CHARS + 1))
+
+
+def test_cloud_available_reflects_adapter(tmp_path) -> None:
+    assert _service(tmp_path).cloud_available is False
+
+    service = ChatService(
+        RecordingEngine(),
+        tmp_path / "chat_history.json",
+        persona_loader=lambda name: f"PROMPT:{name}",
+        cloud=FakeCloud(available=True),
+    )
+    assert service.cloud_available is True
+    assert service.cloud_model == "gemini-3.5-flash-lite"
+
+
+def test_stream_cloud_sends_only_the_message_and_saves_reply(tmp_path) -> None:
+    cloud = FakeCloud(reply="Vanakkam da!")
+    service = ChatService(
+        RecordingEngine(),
+        tmp_path / "chat_history.json",
+        persona_loader=lambda name: f"PROMPT:{name}",
+        cloud=cloud,
+    )
+    service.send("earlier local message")
+
+    chunks = list(service.stream_cloud("cloud question"))
+
+    assert chunks == ["Vanakkam da!"]
+    assert cloud.sent == ["cloud question"]  # no history, no system prompt
+    assert service.messages()[-1] == {"role": "assistant", "content": "Vanakkam da!"}
+
+
+def test_stream_cloud_without_adapter_is_rejected(tmp_path) -> None:
+    service = _service(tmp_path)
+
+    with pytest.raises(ChatError):
+        list(service.stream_cloud("hi"))
+
+
+class FakeSettings:
+    """Minimal settings stand-in exposing `.get`."""
+
+    def __init__(self, **values) -> None:
+        self.values = values
+
+    def get(self, key: str, default=None):
+        return self.values.get(key, default)
+
+
+def test_engine_enabled_defaults_to_true(tmp_path) -> None:
+    assert _service(tmp_path).engine_enabled is True
+
+
+def test_engine_switch_off_blocks_local_chat(tmp_path) -> None:
+    service = ChatService(
+        RecordingEngine(),
+        tmp_path / "chat_history.json",
+        persona_loader=lambda name: f"PROMPT:{name}",
+        settings=FakeSettings(**{"engine.enabled": False}),
+    )
+
+    assert service.engine_enabled is False
+    with pytest.raises(ChatError, match="turned off"):
+        service.send("hi")
+    with pytest.raises(ChatError, match="turned off"):
+        list(service.stream("hi"))
+    assert service.cloud_available is False
 
 
 def test_context_keeps_system_and_last_19(tmp_path) -> None:

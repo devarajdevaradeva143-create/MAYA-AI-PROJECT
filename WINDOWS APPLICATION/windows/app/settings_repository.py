@@ -99,6 +99,20 @@ def _as_choice(*choices: str) -> Callable[[Any], str]:
     return coerce
 
 
+def _as_prompt(max_length: int = 4000) -> Callable[[Any], str]:
+    """Free-form text that may be empty (clearing the Gemini prompt)."""
+
+    def coerce(value: Any) -> str:
+        if not isinstance(value, str):
+            raise SettingsError("expects text")
+        text = value.strip()
+        if len(text) > max_length:
+            raise SettingsError(f"must be at most {max_length} characters")
+        return text
+
+    return coerce
+
+
 def _as_text(max_length: int = 200) -> Callable[[Any], str]:
     def coerce(value: Any) -> str:
         if not isinstance(value, str):
@@ -166,6 +180,7 @@ _SCHEMA: dict[str, Callable[[Any], Any]] = {
     "wake.name_repeat": _as_int(1, 10),
     "wake.clap_count": _as_int(1, 10),
     "wake.reply": _as_text(200),
+    "engine.enabled": _as_bool,
     "engine.host": _as_url,
     "engine.model": _as_text(120),
     "engine.timeout": _as_int(5, 300),
@@ -186,6 +201,7 @@ _SCHEMA: dict[str, Callable[[Any], Any]] = {
     "voice.clap.count": _as_int(1, 10),
     "voice.clap.cooldown": _as_float(1.0, 120.0),
     "cloud.enabled": _as_bool,
+    "cloud.system_prompt": _as_prompt(4000),
     "server.enabled": _as_bool,
     "server.auto_start": _as_bool,
     "server.host": _as_bind_host,

@@ -38,6 +38,8 @@ class ChatPage(QWidget):
         self._health_worker: HealthWorker | None = None
         self._reply_bubble: MessageBubble | None = None
         self._last_text = ""
+        self._cloud_stream = False
+        self._cloud_reason = ""
         self._rows: list[QWidget] = []
         self._loading_combo = False
         self._banner_kind = ""
@@ -88,6 +90,7 @@ class ChatPage(QWidget):
         self._banner_retry.setObjectName("iconButton")
         self._banner_retry.setCursor(Qt.CursorShape.PointingHandCursor)
         self._banner_retry.clicked.connect(self.retry)
+
         banner_layout.addWidget(self._banner_label, 1)
         banner_layout.addWidget(self._banner_retry)
 
@@ -136,7 +139,9 @@ class ChatPage(QWidget):
         composer.addWidget(self._send_button)
         layout.addLayout(composer)
 
-        hint = QLabel("Enter to send · Shift+Enter for a new line · Replies stay on this laptop")
+        hint = QLabel(
+            "Enter to send · Shift+Enter for a new line · Cloud is used only when Lemonade is off"
+        )
         hint.setObjectName("emptyHint")
         hint.setContentsMargins(24, 0, 24, 12)
         layout.addWidget(hint)
@@ -144,6 +149,17 @@ class ChatPage(QWidget):
     # -- badge / health ----------------------------------------------
 
     def refresh_health(self) -> None:
+        if not self._chat.engine_enabled:
+            if self._banner_kind == "engine":
+                self._hide_banner()
+            if self._chat.cloud_available:
+                model = self._chat.cloud_model
+                self._model_label.setText(f"Gemini · cloud{f' ({model})' if model else ''}")
+                self.engine_status.emit("Gemini cloud", "ok")
+            else:
+                self._model_label.setText("Lemonade off")
+                self.engine_status.emit("Lemonade off", "warn")
+            return
         if self._health_worker is not None and self._health_worker.isRunning():
             return
         worker = HealthWorker(self._engine, self)
@@ -157,15 +173,25 @@ class ChatPage(QWidget):
         self._health_worker = None
 
     def _on_health(self, ok: bool, detail: str, model: str) -> None:
+        if not self._chat.engine_enabled:
+            # The switch changed while this probe was running: ignore it.
+            self.refresh_health()
+            return
         if ok:
             if self._banner_kind in {"", "engine"}:
                 self._hide_banner()
-            label = model or self._chat.model
+            label = model or self._chat.model or "Lemonade"
             self._model_label.setText(label)
             self.engine_status.emit("Engine ready", "ok")
         else:
             self._show_banner(f"Engine offline — {detail}", retry=False, kind="engine")
             self.engine_status.emit("Engine offline", "error")
+
+    def showEvent(self, event: Any) -> None:  # noqa: N802 - Qt signature
+        super().showEvent(event)
+        if self._worker is None:
+            # Settings may have switched engines while this page was hidden.
+            self.refresh_health()
 
     def shutdown(self) -> None:
         """Stop workers before the window disappears (prevents QThread crashes)."""
@@ -183,8 +209,8 @@ class ChatPage(QWidget):
 
     # -- transcript ---------------------------------------------------
 
-    def _append_bubble(self, role: str, text: str = "") -> MessageBubble:
-        bubble = MessageBubble(role, text)
+    def _append_bubble(self, role: str, text: str = "", source: str = "") -> MessageBubble:
+        bubble = MessageBubble(role, text, source=source)
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -292,16 +318,43 @@ class ChatPage(QWidget):
             return
         self._input.clear()
         self._append_bubble("user", text)
+        if not self._chat.engine_enabled:
+            # Lemonade is switched off: Gemini answers directly, no per-message ask.
+            if self._chat.cloud_available:
+                self._cloud_reason = "Lemonade is off"
+                self._start_stream(text, cloud=True)
+            else:
+                self._last_text = text
+                self._show_banner(
+                    f"Lemonade is off and {self._cloud_blocked_hint()}. "
+                    "Turn one on in Settings → AI Engine.",
+                    retry=False,
+                )
+            return
         self._start_stream(text)
 
-    def _start_stream(self, text: str) -> None:
+    def _cloud_blocked_hint(self) -> str:
+        """Say why Gemini cannot answer: no key or switched off."""
+        if not self._chat.cloud_enabled:
+            return "Gemini is switched off too"
+        if not self._chat.cloud_configured:
+            return "Gemini has no API key"
+        return "Gemini is not ready"
+
+    def _start_stream(self, text: str, cloud: bool = False) -> None:
         self._last_text = text
+        self._cloud_stream = cloud
+        if not cloud:
+            self._cloud_reason = ""
         self._hide_banner()
-        self._reply_bubble = self._append_bubble("assistant", "")
+        self._show_active_engine(cloud)
+        bubble = self._append_bubble("assistant", "", source=self._engine_label(cloud))
+        bubble.set_placeholder("Thinking…")
+        self._reply_bubble = bubble
         self._scroll_to_bottom()
         self._set_generating(True)
 
-        worker = ChatStreamWorker(self._chat, text, self)
+        worker = ChatStreamWorker(self._chat, text, self, cloud=cloud)
         worker.chunk.connect(self._on_chunk)
         worker.completed.connect(self._on_completed)
         worker.cancelled.connect(self._on_cancelled)
@@ -309,6 +362,18 @@ class ChatPage(QWidget):
         worker.finished.connect(worker.deleteLater)
         self._worker = worker
         worker.start()
+
+    @staticmethod
+    def _engine_label(cloud: bool) -> str:
+        return "Gemini (cloud)" if cloud else "Lemonade (local)"
+
+    def _show_active_engine(self, cloud: bool) -> None:
+        """Keep the header honest about who is generating right now."""
+        if cloud:
+            model = self._chat.cloud_model
+            self._model_label.setText(f"Gemini · cloud{f' ({model})' if model else ''}")
+            return
+        self._model_label.setText(self._chat.model or "Lemonade · local")
 
     def _on_chunk(self, piece: str) -> None:
         if self._reply_bubble is not None:
@@ -319,6 +384,28 @@ class ChatPage(QWidget):
     def _on_completed(self, text: str) -> None:
         if self._reply_bubble is not None and not self._reply_bubble.text().strip() and text:
             self._reply_bubble.set_text(text)
+        if not text.strip():
+            # An empty stream must not leave "Thinking…" on screen forever.
+            self._discard_reply()
+            self._show_banner(
+                "Maya returned an empty reply. Try again.",
+                state="info",
+                retry=False,
+                kind="info",
+            )
+            self._finish_generation()
+            self.reply_finished.emit(text)
+            return
+        if self._cloud_stream:
+            model = self._chat.cloud_model
+            self._model_label.setText(f"Gemini · cloud{f' ({model})' if model else ''}")
+            prefix = f"{self._cloud_reason}, so Gemini answered. " if self._cloud_reason else ""
+            self._show_banner(
+                f"{prefix}Cloud reply from Google Gemini. Only your message was sent.",
+                state="info",
+                retry=False,
+                kind="info",
+            )
         self._finish_generation()
         self.reply_finished.emit(text)
 
@@ -333,6 +420,14 @@ class ChatPage(QWidget):
         self._finish_generation()
 
     def _on_failed(self, error_type: str, message: str) -> None:
+        if not self._cloud_stream and self._chat.cloud_available and self._last_text:
+            # Local engine failed: Gemini answers straight away, no extra click.
+            # Drop the half-streamed local text so there is one clear answer.
+            self._discard_reply()
+            self._finish_generation()
+            self._cloud_reason = "Lemonade failed"
+            self._start_stream(self._last_text, cloud=True)
+            return
         self._drop_empty_reply()
         self._show_banner(_friendly_error(error_type, message), retry=True, kind="chat")
         self._finish_generation()
@@ -340,14 +435,23 @@ class ChatPage(QWidget):
     def _finish_generation(self) -> None:
         self._worker = None
         self._reply_bubble = None
+        self._cloud_stream = False
+        self._cloud_reason = ""
         self._set_generating(False)
 
-    def _drop_empty_reply(self) -> None:
-        bubble = self._reply_bubble
-        if bubble is not None and not bubble.text().strip() and self._rows:
+    def _discard_reply(self) -> None:
+        """Remove the reply bubble (empty or half-streamed) from the transcript."""
+        if self._reply_bubble is not None and self._rows:
             row = self._rows.pop()
             row.setParent(None)
             row.deleteLater()
+        self._reply_bubble = None
+
+    def _drop_empty_reply(self) -> None:
+        bubble = self._reply_bubble
+        if bubble is not None and not bubble.text().strip():
+            self._discard_reply()
+            return
         self._reply_bubble = None
 
     def stop(self) -> None:
@@ -357,7 +461,7 @@ class ChatPage(QWidget):
     def retry(self) -> None:
         if self._worker is not None or not self._last_text:
             return
-        self._start_stream(self._last_text)
+        self._start_stream(self._last_text, cloud=not self._chat.engine_enabled)
 
     def _set_generating(self, generating: bool) -> None:
         self._send_button.setText("Stop" if generating else "Send")
@@ -436,6 +540,10 @@ class ChatPage(QWidget):
 
 def _friendly_error(error_type: str, message: str) -> str:
     lowered = message.lower()
+    if "cloud" in error_type.lower():
+        return f"Cloud reply failed: {message or error_type}"
+    if "turned off" in lowered:
+        return message
     if "timeout" in error_type.lower() or "timed out" in lowered:
         return "Maya did not answer in time. Is Lemonade still running?"
     if "unavailable" in error_type.lower() or "connect" in lowered:

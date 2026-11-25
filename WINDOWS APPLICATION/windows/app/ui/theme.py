@@ -329,6 +329,32 @@ def build_qss(palette: Palette, base_font_size: int = 14) -> str:
     QPushButton#primaryButton:hover {{
         background-color: {p.secondary};
     }}
+    QPushButton#switchOn {{
+        background-color: {p.success};
+        border: none;
+        border-radius: 16px;
+        color: {p.background};
+        font-weight: 700;
+    }}
+    QPushButton#switchOn:hover {{
+        background-color: {p.rgba("success", 0.85)};
+    }}
+    QPushButton#switchOff {{
+        background-color: {p.surface_high};
+        border: 1px solid {p.border};
+        border-radius: 16px;
+        color: {p.text_muted};
+        font-weight: 600;
+    }}
+    QPushButton#switchOff:hover {{
+        border: 1px solid {p.primary};
+        color: {p.primary};
+    }}
+    QLabel#bubbleMeta {{
+        color: {p.text_muted};
+        font-size: 11px;
+        font-weight: 600;
+    }}
     QToolTip {{
         background-color: {p.surface_high};
         color: {p.text};
