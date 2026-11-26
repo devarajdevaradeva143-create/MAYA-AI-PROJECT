@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, Signal
+import threading
+
+from PySide6.QtCore import QEvent, QObject, QMetaObject, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -14,6 +16,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from typing import Any
 
 from app.main import APP_TITLE, DEFAULT_HEIGHT, DEFAULT_WIDTH
 from app.services.chat_service import ChatService
@@ -50,12 +54,68 @@ PAGE_HINTS: dict[str, tuple[str, str]] = {
 }
 
 
+class _GuiConfirmBridge(QObject):
+    """Thread-safe confirmation for intelligence actions in the GUI.
+
+    The intelligence layer runs in a worker thread (chat stream) and asks for
+    permission before destructive actions. Qt widgets must be touched on the
+    main thread, so the request is marshalled with a queued invocation and the
+    worker blocks on an event until the dialog closes.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._pending: dict[str, Any] | None = None
+        self._message: str = ""
+
+    @Slot()
+    def _show_dialog(self) -> None:  # runs on the main (GUI) thread
+        from PySide6.QtWidgets import QMessageBox
+
+        pending = self._pending
+        if pending is None:
+            return
+        box = QMessageBox()
+        box.setWindowTitle("Maya AI")
+        box.setText(self._message)
+        box.setInformativeText("Maya wants to run this action. Allow it?")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        pending["result"] = box.exec() == QMessageBox.StandardButton.Yes
+        pending["event"].set()
+
+    def ask(self, message: str) -> bool:
+        # Called from a worker thread; never touch widgets here.
+        if threading.current_thread() is threading.main_thread():
+            from PySide6.QtWidgets import QMessageBox
+
+            box = QMessageBox()
+            box.setWindowTitle("Maya AI")
+            box.setText(message)
+            box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            return box.exec() == QMessageBox.StandardButton.Yes
+
+        pending: dict[str, Any] = {"result": False, "event": threading.Event()}
+        self._pending = pending
+        self._message = message
+        QMetaObject.invokeMethod(self, "_show_dialog", Qt.ConnectionType.QueuedConnection)
+        pending["event"].wait()
+        self._pending = None
+        return bool(pending["result"])
+
+
 def _make_intelligence_bridge():
     """Best-effort: load the MAYA INTELLIGENCE bridge; None on failure."""
     try:
         from custom.intelligence_bridge import IntelligenceBridge
 
-        bridge = IntelligenceBridge()
+        bridge_obj = _GuiConfirmBridge()
+        bridge = IntelligenceBridge(confirm_fn=bridge_obj.ask)
         return bridge if bridge.available else None
     except Exception:
         return None

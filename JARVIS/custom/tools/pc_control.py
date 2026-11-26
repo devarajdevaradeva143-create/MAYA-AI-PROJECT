@@ -123,18 +123,22 @@ def close_app(app_name: str) -> str:
     """
     if _ask_permission("Close app", app_name):
         try:
+            killed: list[int] = []
             if HAS_PSUTIL:
                 for proc in psutil.process_iter(["name", "pid"]):
                     try:
                         if proc.info["name"] and app_name.lower() in proc.info["name"].lower():
                             proc.kill()
-                            return f"Closed: {app_name} (PID: {proc.info['pid']})"
+                            killed.append(proc.info["pid"])
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         pass
-            # Fallback: taskkill on Windows
-            if sys.platform == "win32":
+            # Fallback: taskkill on Windows (catches processes psutil missed)
+            if sys.platform == "win32" and not killed:
                 _run_cmd(["taskkill", "/f", "/im", app_name + ".exe"])
-            return f"Closed: {app_name}"
+                killed.append(-1)
+            if killed:
+                return f"Closed: {app_name} (PID: {killed[0]})"
+            return f"No running process matched: {app_name}"
         except Exception as e:
             return f"Failed to close {app_name}: {e}"
     else:

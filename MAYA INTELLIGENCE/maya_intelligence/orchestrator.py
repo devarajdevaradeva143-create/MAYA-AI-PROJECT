@@ -347,6 +347,11 @@ class Orchestrator:
         if re.search(r"\b(run|execute)\b.*\b(command|cmd|shell|terminal)\b", t):
             return "run_command"
 
+        # ── "open file X" reads the file instead of launching an app
+        if re.search(r"\bopen\b", t) and re.search(r"\bfiles?\b", t) and \
+                "explorer" not in t and "folder" not in t:
+            return "read_file"
+
         # ── App actions (English + "X open pannu")
         if re.search(r"\b(open|launch|start)\b", t) or re.search(
             r"\b(open|launch)\s+(pannu|pannunga|pannuda)\b", t
