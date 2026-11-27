@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from typing import Any
 
@@ -34,6 +35,7 @@ class VoicePage(QWidget):
     """Maya voice UI: orb, PTT, TTS toggle, wake status, last 10 transcripts, language selector."""
 
     transcript_added = Signal(str, str)  # role, text
+    _listen_finished = Signal()  # emitted when a PTT listen cycle ends
 
     def __init__(self, voice: VoiceAdapter | None = None, wake: WakeAdapter | None = None,
                  chat: ChatService | None = None, parent: QWidget | None = None,
@@ -41,8 +43,13 @@ class VoicePage(QWidget):
         super().__init__(parent)
         self._voice = voice or VoiceAdapter()
         self._wake = wake or WakeAdapter()
+        self._chat = chat
         self._repository = repository
         self._engine = self._read_engine()
+        self._listen_cancelled = False
+        self._listening = False
+        self._chat_active = False
+        self._listen_finished.connect(self._on_listen_finished)
 
         # Transcript log (last 10 entries, local only)
         self._transcripts: deque[tuple[str, str]] = deque(maxlen=10)
@@ -154,16 +161,92 @@ class VoicePage(QWidget):
 
     def _on_orb_toggle(self, checked: bool) -> None:
         if checked:
-            # Start listening
+            if self._listening:
+                # Already recording/transcribing; ignore the extra click.
+                self._orb_button.blockSignals(True)
+                self._orb_button.setChecked(False)
+                self._orb_button.blockSignals(False)
+                self._orb_button.setText("🎤")
+                return
+            # Push-to-talk: record from the mic and transcribe (offline STT).
+            self._listening = True
+            self._listen_cancelled = False
             self._orb_button.setText("Listening…")
-            self._wake.listen(seconds=6)
-            # Start the wake loop in a thread
-            self._wake.start_name_wake()
+            threading.Thread(target=self._listen_worker, daemon=True, name="maya-ptt").start()
         else:
-            # Stop listening
-            self._wake.stop_name_wake()
-            self._wake.stop()
+            # Stop the current recording or cancel an active chat stream.
+            self._listen_cancelled = True
+            if self._chat_active and self._chat is not None:
+                self._chat.cancel()
             self._orb_button.setText("🎤")
+
+    def _listen_worker(self) -> None:
+        lang = getattr(self, "_selected_lang", "en") or "en"
+        try:
+            seconds = int(getattr(self._voice, "listen_seconds", 6))
+        except (TypeError, ValueError):
+            seconds = 6
+        try:
+            text = self._voice.listen_once(seconds=seconds, lang=lang)
+        except Exception as exc:  # VoiceError or anything else - show, never crash
+            if not self._listen_cancelled:
+                self.transcript_added.emit("system", f"STT error: {exc}")
+            self._listening = False
+            self._listen_finished.emit()
+            return
+        if self._listen_cancelled:
+            self._listening = False
+            self._listen_finished.emit()
+            return
+        # Show what was heard.
+        self.transcript_added.emit("user", text)
+        reply = text
+        if self._chat is not None:
+            try:
+                self._chat_active = True
+                if self._chat.engine_enabled:
+                    chunks = self._chat.stream(text)
+                elif self._chat.cloud_available:
+                    chunks = self._chat.stream_cloud(text)
+                else:
+                    raise RuntimeError(
+                        "Lemonade is off and Gemini is unavailable. Check Settings → AI Engine."
+                    )
+                reply = "".join(chunks).strip()
+                if self._listen_cancelled:
+                    self._listening = False
+                    self._listen_finished.emit()
+                    return
+                if not reply:
+                    raise RuntimeError("Maya returned an empty reply.")
+            except Exception as exc:  # noqa: BLE001 - show chat failures in the transcript
+                if not self._listen_cancelled:
+                    self.transcript_added.emit("system", f"Chat error: {exc}")
+                self._listening = False
+                self._listen_finished.emit()
+                return
+            finally:
+                self._chat_active = False
+
+        # Speak Maya's reply (or the transcript when no chat service is wired).
+        if not getattr(self._voice, "is_speaking", False):
+            try:
+                tts_lang = "tamil" if str(lang).lower().startswith("ta") else "english"
+                self._voice.speak(reply, lang=tts_lang, engine="auto")
+                self.transcript_added.emit("assistant", reply)
+            except Exception as exc:  # noqa: BLE001 - TTS failure is non-fatal
+                self.transcript_added.emit("system", f"TTS error: {exc}")
+        else:
+            self.transcript_added.emit("system", "Maya is still speaking - skipped speak-back.")
+        self._listening = False
+        self._listen_finished.emit()
+
+    def _on_listen_finished(self) -> None:
+        self._listening = False
+        self._orb_button.blockSignals(True)
+        self._orb_button.setChecked(False)
+        self._orb_button.blockSignals(False)
+        self._orb_button.setText("🎤")
 
     def _on_lang_change(self, index: int) -> None:
         lang = str(self._lang_combo.currentData())

@@ -29,8 +29,52 @@ from ..config import PROJECT_ROOT, load_settings
 _REQUIRED_MODULES = ("torch", "onnxruntime", "safetensors", "cmudict", "uraikal")
 
 
+def _patch_cmudict_metadata() -> None:
+    """Frozen builds (PyInstaller) bundle cmudict without its dist-info."""
+    try:
+        import cmudict  # noqa: F401
+        return
+    except Exception as exc:  # noqa: BLE001 - only the metadata case is recoverable
+        if "cmudict" not in str(exc).lower() and "package metadata" not in str(exc).lower():
+            return
+    import sys
+
+    if "cmudict" in sys.modules:
+        del sys.modules["cmudict"]
+    try:
+        import importlib.metadata as _md
+
+        _original = _md.version
+
+        def _patched(name: str) -> str:
+            if name == "cmudict":
+                return "1.1.3"
+            return _original(name)
+
+        _md.version = _patched
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+_patch_cmudict_metadata()
+
+
+def _module_available(name: str) -> bool:
+    if importlib.util.find_spec(name) is None:
+        return False
+    try:
+        if name == "cmudict":
+            _patch_cmudict_metadata()
+            import cmudict  # noqa: F401
+        else:
+            importlib.import_module(name)
+    except Exception:  # noqa: BLE001 - treat an unusable module as missing
+        return False
+    return True
+
+
 def _missing_modules() -> list[str]:
-    return [name for name in _REQUIRED_MODULES if importlib.util.find_spec(name) is None]
+    return [name for name in _REQUIRED_MODULES if not _module_available(name)]
 
 
 HAS_KUYIL = not _missing_modules()

@@ -85,7 +85,9 @@ def test_engine_adapter_passes_replies() -> None:
 
     assert adapter.chat([{"role": "user", "content": "x"}]) == "hi"
     assert adapter.model  # read from the bridge
-    assert adapter.health() == {"status": "ok"}
+    health = adapter.health()
+    assert health.get("status") == "ok"
+    assert "models" in health
 
 
 def test_engine_adapter_maps_timeout_string() -> None:

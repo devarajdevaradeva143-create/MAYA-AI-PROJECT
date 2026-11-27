@@ -53,6 +53,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _setting_enabled(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "no", "off", "0"}
+    return bool(value)
+
+
 def create_main_window():
     """Real shell (sidebar + pages). Phase 1 replaces the Phase 0 blank window."""
     from app.settings_repository import SettingsRepository
@@ -74,6 +80,20 @@ def _make_tray_icon(icon_name: str = "Maya") -> pystray.Icon:
             def run(self):  # type: ignore[override]
                 pass
             def stop(self):  # type: ignore[override]
+                pass
+            def run_detached(self):  # type: ignore[override]
+                pass
+            @property
+            def menu(self):  # type: ignore[override]
+                return None
+            @menu.setter
+            def menu(self, value):  # type: ignore[override]
+                pass
+            @property
+            def double_click_callback(self):  # type: ignore[override]
+                return None
+            @double_click_callback.setter
+            def double_click_callback(self, value):  # type: ignore[override]
                 pass
         return _NoopIcon()
 
@@ -130,6 +150,24 @@ def run_gui(argv: Sequence[str] | None = None, start_hidden: bool = False, tray_
         if lock.exec() != QDialog.DialogCode.Accepted:
             return 0
 
+    # Ensure local engine is running (non-blocking, background thread)
+    def _ensure_local_engine() -> None:
+        try:
+            from app.services.engine_bootstrap import ensure_engine
+
+            if not _setting_enabled(repository.get("engine.enabled", True)):
+                logger.info("Local engine is disabled; skipping startup")
+                return
+            host = str(repository.get("engine.host", "http://localhost:13305"))
+            if ensure_engine(host):
+                logger.info("Local engine is running")
+            else:
+                logger.warning("Local engine could not be started")
+        except Exception as exc:  # noqa: BLE001 - never block startup
+            logger.error("Engine bootstrap failed: %s", exc)
+
+    threading.Thread(target=_ensure_local_engine, name="maya-engine-bootstrap", daemon=True).start()
+
     # In tray-only mode, don't create the main window at all
     if not tray_only:
         _main_window = MayaMainWindow(
@@ -163,10 +201,7 @@ def run_gui(argv: Sequence[str] | None = None, start_hidden: bool = False, tray_
     tray_icon.double_click_callback = _on_tray_double_click
     tray_icon.run_detached()  # run in background; does not block
 
-    def _on_activated() -> None:
-        instance.activated.connect(_show_window)
-
-    instance.activated.connect(_on_activated)
+    instance.activated.connect(_show_window)
 
     if not start_hidden and not tray_only:
         _main_window.show()
@@ -186,6 +221,12 @@ def run_gui(argv: Sequence[str] | None = None, start_hidden: bool = False, tray_
             )
         except Exception as exc:  # noqa: BLE001 - never block the UI
             logger.error("Phone server auto-start failed: %s", exc)
+
+    # Monitor page still shows paired-phone stats when the phone server runs
+    # elsewhere (e.g. `--headless`), so register the token-store provider now.
+    from app.services.server_service import register_token_store_phone_stats
+
+    register_token_store_phone_stats()
 
     if bool(repository.get("server.auto_start", False)) and bool(
         repository.get("server.enabled", True)

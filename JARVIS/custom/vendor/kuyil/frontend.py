@@ -12,7 +12,28 @@ Everything here is a first draft for a Tamil linguist to review
 import json, re, sys, unicodedata
 from collections import Counter
 
-import cmudict
+import sys
+
+try:
+    import cmudict
+except Exception as _cmudict_exc:  # missing dist-info metadata in frozen builds
+    if "cmudict" in sys.modules:
+        del sys.modules["cmudict"]
+    try:
+        import importlib.metadata as _md
+
+        _original_version = _md.version
+
+        def _patched_version(name):
+            if name == "cmudict":
+                return "1.1.3"
+            return _original_version(name)
+
+        _md.version = _patched_version
+        import cmudict
+    except Exception:
+        raise _cmudict_exc
+
 from uraikal.numbers import UNITS, to_words
 
 SPECIAL = ["<pad>", "<bos>", "<eos>", "<space>", ".", ",", "?", "!", ";", ":"]

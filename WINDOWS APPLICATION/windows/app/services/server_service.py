@@ -430,6 +430,50 @@ def _print_pairing(service: ServerService) -> None:
     print("=" * 52)
 
 
+def register_token_store_phone_stats() -> None:
+    """Feed the Monitor page from the token store without starting the server.
+
+    The provider registered in :meth:`ServerService.start` only exists while this
+    window owns the server. When the phone server already runs elsewhere (e.g.
+    `python -m app.main --headless`), the Monitor page still needs the phone
+    battery/RAM cards, so read them straight from the shared token file.
+    """
+    try:
+        from custom.server.auth import TokenStore
+    except Exception:  # noqa: BLE001 - monitor cards are optional
+        logger.debug("Token store unavailable for phone stats", exc_info=True)
+        return
+
+    def _phone_stats_provider() -> list[dict[str, Any]]:
+        try:
+            # Fresh store per read: the running server rewrites this file.
+            devices = TokenStore().list_active()
+            phone_stats: list[dict[str, Any]] = []
+            for d in devices:
+                if (
+                    d.phone_battery_percent is not None
+                    or d.phone_storage_used_percent is not None
+                    or d.phone_ram_used_percent is not None
+                    or d.phone_uptime_hours is not None
+                ):
+                    phone_stats.append(
+                        {
+                            "device_id": d.device_id,
+                            "name": d.name,
+                            "battery_percent": d.phone_battery_percent,
+                            "storage_used_percent": d.phone_storage_used_percent,
+                            "ram_used_percent": d.phone_ram_used_percent,
+                            "uptime_hours": d.phone_uptime_hours,
+                            "updated": d.phone_stats_updated,
+                        }
+                    )
+            return phone_stats
+        except Exception:  # noqa: BLE001 - never break the monitor poll
+            return []
+
+    set_phone_stats_provider(_phone_stats_provider)
+
+
 _SHARED_SERVICE: ServerService | None = None
 _SHARED_LOCK = threading.Lock()
 

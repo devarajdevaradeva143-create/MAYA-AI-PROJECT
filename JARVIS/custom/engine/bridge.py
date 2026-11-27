@@ -64,6 +64,10 @@ class EngineBridge:
         self.timeout = float(engine_cfg.get("timeout", 30))
         self.temperature = float(engine_cfg.get("temperature", 0.7))
         self.max_tokens = int(engine_cfg.get("max_tokens", 512))
+        # Reasoning models (Qwen3 / Qwen3.5) can spend the whole max_tokens budget
+        # on hidden reasoning and return empty content. ``engine.disable_thinking``
+        # switches that off so the answer text is always produced.
+        self.disable_thinking = bool(engine_cfg.get("disable_thinking", False))
 
         # venv lives at JARVIS/.venv-engine (PROJECT_ROOT is the top-level folder).
         self._jarvis = PROJECT_ROOT / "JARVIS" / ".venv-engine" / "Scripts" / "jarvis.exe"
@@ -132,6 +136,12 @@ class EngineBridge:
             yield f"[engine error] {exc}"
 
     # ── Direct (HTTP) mode ─────────────────────────────────────────
+    def _extra_payload(self) -> dict[str, Any]:
+        """Settings-driven request options (currently just thinking mode)."""
+        if not self.disable_thinking:
+            return {}
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+
     def _health_direct(self) -> dict[str, Any]:
         r = self._client.get(f"{self.host}/v1/models", timeout=10)
         r.raise_for_status()
@@ -161,6 +171,7 @@ class EngineBridge:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": stream,
+            **self._extra_payload(),
         }
         r = self._client.post(
             f"{self.host}/v1/chat/completions",
@@ -185,6 +196,7 @@ class EngineBridge:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": True,
+            **self._extra_payload(),
         }
         with self._client.stream(
             "POST",

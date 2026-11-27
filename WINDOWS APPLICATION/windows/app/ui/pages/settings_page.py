@@ -7,6 +7,7 @@ ruamel round-trip write. The page never edits YAML itself.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,14 @@ from PySide6.QtWidgets import (
 from app.services import autostart_service
 from app.services.bluetooth_remote_client import reset_bluetooth_client
 from app.services.cloud_service import CloudAdapter
+from app.services.engine_service import EngineAdapter
+from app.services.model_service import ModelService
 from app.services.phone_remote_client import reset_phone_remote_client
 from app.services.server_service import shared_server_service
 from app.services.wan_remote_client import reset_wan_client
 from app.settings_repository import SettingsError, SettingsRepository
 from app.ui.theme import MODES, ThemeManager
+from app.ui.widgets import ModelManager
 from app.ui.workers import ServerStartWorker
 
 logger = logging.getLogger("maya.ui.settings")
@@ -79,6 +83,11 @@ class SettingsPage(QScrollArea):
     theme_changed = Signal(str)
     settings_saved = Signal(dict)
 
+    # Engine probes run off the UI thread and report back through these.
+    _engine_health = Signal(bool, str, str)  # ok, model, error
+    _engine_progress = Signal(dict)  # one pull chunk
+    _engine_fix_done = Signal(bool)  # engine started?
+
     def __init__(
         self,
         repository: SettingsRepository,
@@ -86,13 +95,21 @@ class SettingsPage(QScrollArea):
         *,
         server_factory: Callable[[], Any] | None = None,
         cloud: Any | None = None,
+        engine: Any | None = None,
+        model_service: ModelService | None = None,
     ) -> None:
         super().__init__()
         self._repository = repository
         self._theme = theme
         self._cloud = cloud or CloudAdapter()
         self._server_factory = server_factory or shared_server_service
+        self._engine = engine
+        self._model_service = model_service
+        self._engine_health_running = False
         self._server_start_worker: ServerStartWorker | None = None
+        self._engine_health.connect(self._apply_engine_health)
+        self._engine_progress.connect(self._apply_engine_progress)
+        self._engine_fix_done.connect(self._apply_engine_fix_done)
         self.setWidgetResizable(True)
         self.setObjectName("settingsPage")
 
@@ -191,6 +208,7 @@ class SettingsPage(QScrollArea):
             "on or off; use whichever you prefer.",
         )
 
+        # Local engine row
         local_row = QHBoxLayout()
         local_row.setSpacing(12)
         local_label = QLabel("Lemonade (local engine)")
@@ -204,6 +222,50 @@ class SettingsPage(QScrollArea):
         local_row.addWidget(self._engine_status, 1)
         local_row.addWidget(self._engine_enable)
         layout.addLayout(local_row)
+
+        # Model info row
+        model_row = QHBoxLayout()
+        model_row.setSpacing(12)
+        self._model_name_label = QLabel("Model: —")
+        self._model_name_label.setMinimumWidth(180)
+        self._model_name_label.setObjectName("emptyHint")
+        model_row.addWidget(self._model_name_label)
+        layout.addLayout(model_row)
+
+        # Backend badge row
+        backend_row = QHBoxLayout()
+        backend_row.setSpacing(12)
+        self._backend_label = QLabel("Backend: —")
+        self._backend_label.setMinimumWidth(180)
+        self._backend_label.setObjectName("emptyHint")
+        backend_row.addWidget(self._backend_label)
+        layout.addLayout(backend_row)
+
+        # Action buttons row
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        action_row.addStretch(1)
+
+        self._engine_download_btn = QPushButton("Download")
+        self._engine_download_btn.setFixedHeight(32)
+        self._engine_download_btn.clicked.connect(self._on_engine_download)
+        self._engine_download_btn.setVisible(False)
+        action_row.addWidget(self._engine_download_btn)
+
+        self._engine_fix_btn = QPushButton("Fix")
+        self._engine_fix_btn.setFixedHeight(32)
+        self._engine_fix_btn.clicked.connect(self._on_engine_fix)
+        self._engine_fix_btn.setVisible(False)
+        action_row.addWidget(self._engine_fix_btn)
+
+        layout.addLayout(action_row)
+
+        # Model Manager
+        self._model_manager = ModelManager(
+            self._repository, model_service=self._model_service, parent=self
+        )
+        self._model_manager.model_changed.connect(self._on_model_changed)
+        layout.addWidget(self._model_manager)
 
         cloud_row = QHBoxLayout()
         cloud_row.setSpacing(12)
@@ -273,6 +335,11 @@ class SettingsPage(QScrollArea):
         self._sync_switch_hint()
         self.settings_saved.emit({"engine.enabled": bool(checked)})
 
+    def _on_model_changed(self, model_id: str) -> None:
+        """Called when user sets a new default model from ModelManager."""
+        self._refresh_engine_state()
+        self.settings_saved.emit({"engine.model": model_id})
+
     @staticmethod
     def _revert_switch(button: QPushButton, checked: bool) -> None:
         """Put the switch back when the setting could not be written."""
@@ -287,7 +354,14 @@ class SettingsPage(QScrollArea):
         self._engine_enable.setChecked(enabled)
         self._engine_enable.blockSignals(False)
         self._paint_switch(self._engine_enable, enabled)
+
+        model = str(self._repository.get("engine.model", "") or "")
+        self._model_name_label.setText(f"Model: {model}" if model else "Model: —")
+
         if not enabled:
+            self._engine_download_btn.setVisible(False)
+            self._engine_fix_btn.setVisible(False)
+            self._backend_label.setText("Backend: —")
             if self._cloud_off():
                 self._engine_status.setText(
                     "Status: Off — Gemini is off too, so chat cannot answer. Turn one on."
@@ -295,10 +369,128 @@ class SettingsPage(QScrollArea):
             else:
                 self._engine_status.setText("Status: Off — chat answers with Gemini (cloud).")
             return
+
         host = str(self._repository.get("engine.host", "") or "localhost")
-        model = str(self._repository.get("engine.model", "") or "")
         detail = f" · {model}" if model else ""
         self._engine_status.setText(f"Status: On · {host}{detail}")
+
+        # Check engine health and model availability in background
+        self._check_engine_health(model)
+
+    def _check_engine_health(self, model: str) -> None:
+        """Probe the engine off the UI thread; the result arrives as a signal."""
+        if self._engine_health_running:
+            return
+        self._engine_health_running = True
+        engine = self._engine if self._engine is not None else EngineAdapter()
+
+        def worker() -> None:
+            try:
+                health = engine.health()
+                ok = bool(
+                    health.get("ok", health.get("status") in {"ok", "healthy", "ready"})
+                )
+                models = [str(m) for m in (health.get("models") or [])]
+                missing = "not downloaded" if ok and model and model not in models else ""
+                self._engine_health.emit(ok, model, missing)
+            except Exception as exc:  # noqa: BLE001 - shown in the status label
+                self._engine_health.emit(False, model, str(exc))
+
+        threading.Thread(target=worker, name="maya-engine-health", daemon=True).start()
+
+    def _apply_engine_health(self, ok: bool, model: str, error: str) -> None:
+        """Render the health probe result (UI thread)."""
+        self._engine_health_running = False
+        if not _flag(self._repository.get("engine.enabled", True)):
+            return
+
+        if not ok:
+            self._engine_status.setText("Status: Engine offline")
+            self._engine_fix_btn.setVisible(True)
+            self._engine_download_btn.setVisible(False)
+            self._backend_label.setText("Backend: Unknown")
+            return
+
+        backend = "FLM (NPU)" if "FLM" in model.upper() else "llama.cpp (GPU)"
+        self._backend_label.setText(f"Backend: {backend}")
+
+        if error:
+            self._engine_status.setText("Status: Model not downloaded")
+            self._engine_download_btn.setVisible(True)
+            self._engine_fix_btn.setVisible(False)
+            return
+
+        host = str(self._repository.get("engine.host", "") or "localhost")
+        self._engine_status.setText(f"Status: Ready · {host}")
+        self._engine_download_btn.setVisible(False)
+        self._engine_fix_btn.setVisible(False)
+
+    def _on_engine_download(self) -> None:
+        """Download the configured model in the background."""
+        model = str(self._repository.get("engine.model", "") or "")
+        if not model:
+            return
+        self._engine_download_btn.setEnabled(False)
+        self._engine_download_btn.setText("Downloading...")
+        self._engine_status.setText(f"Status: Downloading {model}...")
+
+        service = self._model_service
+        if service is None:
+            host = str(self._repository.get("engine.host", "http://localhost:13305"))
+            service = ModelService(host=host)
+
+        def worker() -> None:
+            try:
+                for chunk in service.pull(model):
+                    self._engine_progress.emit(chunk)
+            except Exception as exc:  # noqa: BLE001 - shown in the status label
+                self._engine_progress.emit({"status": "error", "message": str(exc)})
+
+        threading.Thread(target=worker, name="maya-model-download", daemon=True).start()
+
+    def _apply_engine_progress(self, chunk: dict[str, Any]) -> None:
+        """Render one download progress chunk (UI thread)."""
+        status = str(chunk.get("status", ""))
+        if status == "downloading":
+            message = str(chunk.get("message", "") or "").strip()
+            if message:
+                self._engine_status.setText(f"Status: {message}")
+        elif status == "completed":
+            self._engine_status.setText("Status: Download complete — checking...")
+            self._engine_download_btn.setEnabled(True)
+            self._engine_download_btn.setText("Download")
+            self._refresh_engine_state()
+        elif status in {"error", "cancelled"}:
+            message = str(chunk.get("message", status) or status)
+            self._engine_status.setText(f"Status: Download failed — {message}")
+            self._engine_download_btn.setEnabled(True)
+            self._engine_download_btn.setText("Download")
+
+    def _on_engine_fix(self) -> None:
+        """Start the local engine in the background."""
+        self._engine_fix_btn.setEnabled(False)
+        self._engine_fix_btn.setText("Fixing...")
+        self._engine_status.setText("Status: Starting engine...")
+
+        def worker() -> None:
+            try:
+                host = str(self._repository.get("engine.host", "http://localhost:13305"))
+                from app.services.engine_bootstrap import ensure_engine
+
+                self._engine_fix_done.emit(ensure_engine(host))
+            except Exception:  # noqa: BLE001 - reported as a failed start
+                self._engine_fix_done.emit(False)
+
+        threading.Thread(target=worker, name="maya-engine-fix", daemon=True).start()
+
+    def _apply_engine_fix_done(self, ok: bool) -> None:
+        """Render the engine-start result (UI thread)."""
+        self._engine_fix_btn.setEnabled(True)
+        self._engine_fix_btn.setText("Fix")
+        if ok:
+            self._refresh_engine_state()
+        else:
+            self._engine_status.setText("Status: Engine start failed")
 
     def _on_cloud_toggled(self, checked: bool) -> None:
         try:

@@ -18,12 +18,13 @@ def test_bridge_reads_settings_from_yaml() -> None:
     """Bridge reads host/model/timeouts from settings.yaml — never hardcoded."""
     b = EngineBridge()
     assert b.host == "http://localhost:13305"
-    assert b.model == "qwen3.5-2b-FLM"
-    assert b.fallback_model == "qwen3-it-4b-FLM"
-    assert b.timeout == 30
+    assert b.model == "Qwen3.5-2B-GGUF"
+    assert b.fallback_model == "qwen3-1.7b-instruct-q4_k_m"
+    assert b.timeout == 60
     assert b.temperature == 0.7
     assert b.max_tokens == 512
     assert b.mode == "direct"
+    assert b.disable_thinking is True
 
 
 def test_engine_error_is_runtime_error() -> None:
@@ -47,7 +48,8 @@ def test_list_models() -> None:
     b = EngineBridge()
     models = b.list_models()
     assert isinstance(models, list)
-    assert "qwen3.5-2b-FLM" in models
+    # The configured model must exist in the server catalog, otherwise chat fails.
+    assert b.model in models
 
 
 # ── Chat ────────────────────────────────────────────────────────────

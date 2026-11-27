@@ -14,6 +14,15 @@ def test_dev_paths_resolve() -> None:
     assert paths.settings_available()
 
 
+def test_engine_setting_parses_boolean_strings() -> None:
+    from app.main import _setting_enabled
+
+    assert _setting_enabled(True) is True
+    assert _setting_enabled("false") is False
+    assert _setting_enabled("off") is False
+    assert _setting_enabled("true") is True
+
+
 def test_maya_ai_home_override(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(paths.MAYA_AI_HOME_ENV, str(tmp_path))
     assert paths.maya_ai_dir() == tmp_path

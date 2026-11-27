@@ -403,8 +403,18 @@ def listen(seconds: int = 6, lang: str = "en") -> tuple[str | None, str | None]:
         text = transcribe_wav(wav, lang)
     except ImportError:
         return None, "Vosk is not installed (pip install vosk)."
-    except Exception as exc:
-        return None, f"Transcription failed: {exc.__class__.__name__}"
+    except Exception as exc:  # noqa: BLE001 - report the real reason
+        import traceback
+
+        detail = f"{exc.__class__.__name__}: {exc}"
+        try:
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            # Keep it short but include the failing file/line.
+            last_lines = "\n".join(tb.strip().splitlines()[-6:])
+            detail = f"{detail}\n{last_lines}"
+        except Exception:  # pragma: no cover - never crash reporting
+            pass
+        return None, f"Transcription failed: {detail}"
     finally:
         try:
             os.remove(wav)  # privacy: delete the audio immediately

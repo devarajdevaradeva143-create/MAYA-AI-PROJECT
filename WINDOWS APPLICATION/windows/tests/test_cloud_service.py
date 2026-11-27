@@ -9,6 +9,24 @@ import pytest
 from app.services.cloud_service import CloudAdapter, CloudUnavailableError
 from app.settings_repository import SettingsError, SettingsRepository
 from app.ui.pages.settings_page import SettingsPage
+from tests.fakes import FakeEngine
+
+
+class FakeModelService:
+    """Stand-in for ModelService in tests."""
+
+    def __init__(self) -> None:
+        self._models = [
+            {"id": "qwen3.5-2b-FLM", "recipe": "flm", "size": 3100000000, "labels": ["chat", "vision"], "downloaded": True},
+            {"id": "qwen3-it-4b-FLM", "recipe": "flm", "size": 4200000000, "labels": ["chat"], "downloaded": False},
+            {"id": "extra.qwen3-1.7b-instruct-q4_k_m", "recipe": "llamacpp", "size": 1200000000, "labels": ["chat"], "downloaded": True},
+        ]
+
+    def catalog(self) -> list[dict[str, Any]]:
+        return [dict(m) for m in self._models]
+
+    def installed(self) -> list[dict[str, Any]]:
+        return [dict(m) for m in self._models if m.get("downloaded")]
 
 
 class FakeTools:
@@ -126,7 +144,7 @@ def test_settings_prompt_box_saves_to_yaml(qtbot, tmp_path) -> None:
     path = tmp_path / "settings.yaml"
     path.write_text("cloud:\n  enabled: true\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     page._cloud_prompt_input.setPlainText("You are Maya. Reply in Tanglish.")
@@ -149,7 +167,7 @@ def test_settings_cloud_card_saves_key(qtbot, tmp_path) -> None:
     path.write_text("cloud:\n  enabled: true\n  model: gemini-3.5-flash-lite\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
     tools = FakeTools()
-    page = SettingsPage(repo, cloud=CloudAdapter(tools))
+    page = SettingsPage(repo, cloud=CloudAdapter(tools), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     assert "Ready" in page._cloud_status.text()
@@ -166,7 +184,7 @@ def test_settings_toggle_writes_cloud_enabled(qtbot, tmp_path) -> None:
     path = tmp_path / "settings.yaml"
     path.write_text("cloud:\n  enabled: true\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     page._cloud_enable.setChecked(False)
@@ -178,9 +196,9 @@ def test_settings_toggle_writes_cloud_enabled(qtbot, tmp_path) -> None:
 
 def test_settings_engine_switch_writes_engine_enabled(qtbot, tmp_path) -> None:
     path = tmp_path / "settings.yaml"
-    path.write_text("engine:\n  enabled: true\n  host: http://localhost:13305\n", encoding="utf-8")
+    path.write_text("engine:\n  enabled: true\n  host: http://localhost:13305\n  model: qwen3.5-2b-FLM\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), engine=FakeEngine(), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     assert page._engine_enable.text() == "On"
@@ -204,7 +222,7 @@ def test_settings_switch_colours_track_state(qtbot, tmp_path) -> None:
         "engine:\n  enabled: true\ncloud:\n  enabled: true\n", encoding="utf-8"
     )
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     assert page._engine_enable.objectName() == "switchOn"
@@ -216,7 +234,7 @@ def test_switch_reverts_when_the_write_fails(qtbot, tmp_path, monkeypatch) -> No
     path = tmp_path / "settings.yaml"
     path.write_text("engine:\n  enabled: true\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     def refuse(changes):
@@ -235,7 +253,7 @@ def test_quoted_yaml_boolean_shows_off(qtbot, tmp_path) -> None:
     path = tmp_path / "settings.yaml"
     path.write_text('engine:\n  enabled: "false"\n', encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     assert page._engine_enable.isChecked() is False
@@ -248,7 +266,7 @@ def test_both_engines_off_warns_in_settings(qtbot, tmp_path) -> None:
         "engine:\n  enabled: true\ncloud:\n  enabled: true\n", encoding="utf-8"
     )
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()))
+    page = SettingsPage(repo, cloud=CloudAdapter(FakeTools()), model_service=FakeModelService())
     qtbot.addWidget(page)
 
     page._engine_enable.setChecked(False)

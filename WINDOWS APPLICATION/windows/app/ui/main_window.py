@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import threading
+from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, QMetaObject, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QMetaObject, QObject, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -16,8 +17,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from typing import Any
 
 from app.main import APP_TITLE, DEFAULT_HEIGHT, DEFAULT_WIDTH
 from app.services.chat_service import ChatService

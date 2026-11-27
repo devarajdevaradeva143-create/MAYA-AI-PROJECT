@@ -222,7 +222,6 @@ class ControlService:
         message = output or "(no output)"
         if error:
             message += f"\nStderr: {error}"
-        self._audit(command, ok=True)
         return {"message": message, "returncode": completed.returncode}
 
     # -- system -------------------------------------------------------

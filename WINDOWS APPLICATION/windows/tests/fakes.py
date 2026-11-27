@@ -27,15 +27,17 @@ class FakeEngine:
         chunks: list[str] | None = None,
         error: Exception | None = None,
         stream_error: Exception | None = None,
+        models: list[str] | None = None,
     ) -> None:
         self.reply = reply
         self.chunks = chunks if chunks is not None else ["Van", "akkam"]
         self.error = error
         self.stream_error = stream_error
         self.last_messages: list[dict[str, str]] = []
+        self._models = models or ["qwen3.5-2b-FLM", "qwen3-it-4b-FLM"]
 
     def health(self) -> dict[str, Any]:
-        return {"status": "ok"}
+        return {"status": "ok", "models": self._models}
 
     def chat(self, messages: list[dict[str, str]]) -> str:
         self.last_messages = messages

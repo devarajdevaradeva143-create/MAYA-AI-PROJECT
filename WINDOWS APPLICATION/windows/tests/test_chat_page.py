@@ -75,7 +75,8 @@ def test_reply_says_who_answered(qtbot, tmp_path) -> None:
 
     labels = [row.findChild(MessageBubble).source for row in page._rows]
     assert labels == ["", "Lemonade (local)"]
-    assert "Lemonade" in page._model_label.text()
+    # Model label now shows the actual model name from health response
+    assert "qwen3.5-2b-FLM" in page._model_label.text()
 
 
 def test_cloud_reply_says_gemini_answered(qtbot, tmp_path) -> None:

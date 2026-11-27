@@ -6,6 +6,7 @@ module adds `synthesize_wav`. Everything stays local.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,8 @@ from typing import Any
 from custom.config import load_settings
 from custom.tools import voice as voice_tools
 from custom.tools import voice_stt
+
+logger = logging.getLogger("maya.voice")
 
 SAPI_TIMEOUT_S = 90
 TTS_TEXT_MAX = 1000
@@ -81,6 +84,7 @@ class VoiceAdapter:
         self._speak_lock = threading.Lock()
         self._speak_busy = threading.Lock()
         self._stop_event: threading.Event | None = None
+        self._last_tts_error: str = ""
 
     @property
     def listen_seconds(self) -> int:
@@ -157,6 +161,7 @@ class VoiceAdapter:
         """
         key = _voice_lang_key(lang or self._default_lang)
         length = self._listen_seconds if seconds is None else int(seconds)
+        configured = self._stt_engine()
 
         # Tamil uses Whisper (Vosk has no Tamil model).
         if key == "ta":
@@ -164,48 +169,25 @@ class VoiceAdapter:
                 raise VoiceError(
                     "Tamil STT needs faster-whisper. Install it into the app venv."
                 )
-            configured = self._stt_engine()
             if configured == "vosk":
                 raise VoiceError(
                     "Tamil needs Whisper; set voice.stt.engine to auto or whisper."
                 )
-            try:
-                wav, _peak = voice_stt.record(seconds=length)
-            except Exception as exc:
-                raise VoiceError(f"Could not record audio: {exc}") from exc
-            try:
-                text = voice_tools.stt.transcribe(wav, language="ta")
-            finally:
-                try:
-                    Path(wav).unlink(missing_ok=True)
-                except OSError:
-                    pass
-            if text.startswith("[STT]"):
-                raise VoiceError(text)
-            result = text.strip()
-            if not result:
-                raise VoiceError("Could not understand the audio — speak closer to the mic.")
-            return result
 
-        configured = self._stt_engine()
-        if configured == "whisper" and voice_tools.HAS_WHISPER:
-            try:
-                wav, _peak = voice_stt.record(seconds=length)
-            except Exception as exc:
-                raise VoiceError(f"Could not record audio: {exc}") from exc
-            try:
-                text = voice_tools.stt.transcribe(wav, language="en")
-            finally:
-                try:
-                    Path(wav).unlink(missing_ok=True)
-                except OSError:
-                    pass
-            if text.startswith("[STT]"):
-                raise VoiceError(text)
-            result = text.strip()
-            if not result:
+        # Whisper hears this laptop's mic far better than Vosk does (Vosk
+        # returned empty transcripts at peak 3410 on real speech), so `auto`
+        # means "Whisper first, Vosk as the fallback".
+        if voice_tools.HAS_WHISPER and configured in {"auto", "whisper"}:
+            result = self._transcribe_mic_whisper(length, key)
+            if result:
+                return result
+            if (
+                key == "ta"
+                or configured == "whisper"
+                or not voice_stt.available().get(key)
+            ):
                 raise VoiceError("Could not understand the audio — speak closer to the mic.")
-            return result
+            # Whisper caught nothing; Vosk sometimes still hears a short phrase.
 
         if not voice_stt.available().get(key):
             raise VoiceError(
@@ -214,11 +196,29 @@ class VoiceAdapter:
             )
         text, error = voice_stt.listen(seconds=length, lang=key)
         if error:
+            logger.error("STT listen failed: %s", error)
             raise VoiceError(error)
         result = (text or "").strip()
         if not result:
             raise VoiceError("Could not understand the audio — speak closer to the mic.")
         return result
+
+    def _transcribe_mic_whisper(self, seconds: int, key: str) -> str:
+        """Record from the mic and run Whisper. Empty string means no speech."""
+        try:
+            wav, _peak = voice_stt.record(seconds=seconds)
+        except Exception as exc:
+            raise VoiceError(f"Could not record audio: {exc}") from exc
+        try:
+            text = voice_tools.stt.transcribe(wav, language="ta" if key == "ta" else "en")
+        finally:
+            try:
+                Path(wav).unlink(missing_ok=True)
+            except OSError:
+                pass
+        if text.startswith("[STT]"):
+            raise VoiceError(text)
+        return text.strip()
 
     def transcribe_file(self, path: str | Path, lang: str | None = None) -> str:
         """Transcribe an existing WAV file (used by tests and future tools)."""
@@ -231,7 +231,7 @@ class VoiceAdapter:
             raise VoiceError("No speech recognised in that file.")
         return text
 
-    # -- TTS ----------------------------------------------------------
+    # -- STT (file) ----------------------------------------------------------
 
     def transcribe(self, wav_path: Path, lang: str) -> dict[str, Any]:
         key = _voice_lang_key(lang)
@@ -283,7 +283,7 @@ class VoiceAdapter:
             if self._kuyil_wav(text, target):
                 return target
             if choice == "kuyil":
-                raise RuntimeError("Kuyil TTS is not installed")
+                raise RuntimeError(self._last_tts_error or "Kuyil TTS is not installed")
 
         if choice in {"auto", "piper"}:
             if self._piper_wav(text, lang, target):
@@ -429,11 +429,17 @@ class VoiceAdapter:
     def _kuyil_wav(self, text: str, target: Path) -> bool:
         tts = voice_tools.tts_kuyil
         if not tts.is_available():
+            self._last_tts_error = "Kuyil TTS is not installed (deps or model missing)"
             return False
         err = tts.synthesize_wav(text, target)
         if err:
+            self._last_tts_error = str(err)
             return False
-        return self._valid_wav(target)
+        if not self._valid_wav(target):
+            self._last_tts_error = "Kuyil produced an invalid WAV"
+            return False
+        self._last_tts_error = ""
+        return True
 
     def _piper_wav(self, text: str, lang: str, target: Path) -> bool:
         # Use the piper Python API (the 1.8 CLI is broken for file output).

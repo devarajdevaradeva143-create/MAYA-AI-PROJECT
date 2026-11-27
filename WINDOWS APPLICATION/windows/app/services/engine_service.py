@@ -19,6 +19,13 @@ TIMEOUT_MARKERS = (
     "connect timeout",
 )
 
+MODEL_MISSING_MARKERS = (
+    "model_load_error",
+    "failed to load model",
+    "no model loaded",
+    "model not found",
+)
+
 
 class EngineUnavailableError(RuntimeError):
     """Engine unreachable or returned no content."""
@@ -28,9 +35,17 @@ class EngineTimeoutError(TimeoutError):
     """Engine did not answer within the configured timeout."""
 
 
+class EngineModelMissingError(EngineUnavailableError):
+    """Engine is up but the configured model is not installed."""
+
+
 def _raise_for_error(text: str) -> None:
     message = text[len(ENGINE_ERROR_PREFIX) :].strip()
     lowered = message.lower()
+    if any(marker in lowered for marker in MODEL_MISSING_MARKERS):
+        raise EngineModelMissingError(
+            f"Model '{message}' is not downloaded. Open Settings -> AI Engine -> Download."
+        )
     if any(marker in lowered for marker in TIMEOUT_MARKERS):
         raise EngineTimeoutError(message or "Engine timeout")
     raise EngineUnavailableError(message or "Engine unavailable")
@@ -56,6 +71,15 @@ class EngineAdapter:
 
     def health(self) -> dict[str, Any]:
         return self._bridge.health()
+
+    def has_model(self) -> bool:
+        """True when the configured model appears in /v1/models as downloaded."""
+        try:
+            health = self._bridge.health()
+            models = health.get("models", [])
+            return self.model in models
+        except Exception:  # noqa: BLE001
+            return False
 
     def chat(self, messages: list[dict[str, str]]) -> str:
         reply = self._bridge.chat(messages)

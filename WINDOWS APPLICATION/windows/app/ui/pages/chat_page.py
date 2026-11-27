@@ -184,7 +184,15 @@ class ChatPage(QWidget):
             self._model_label.setText(label)
             self.engine_status.emit("Engine ready", "ok")
         else:
-            self._show_banner(f"Engine offline — {detail}", retry=False, kind="engine")
+            # Distinguish model-not-downloaded from other engine errors
+            if isinstance(detail, str) and "not downloaded" in detail.lower():
+                self._show_banner(
+                    "Local model not installed — open Settings → AI Engine to download it.",
+                    retry=False,
+                    kind="engine",
+                )
+            else:
+                self._show_banner(f"Engine offline — {detail}", retry=False, kind="engine")
             self.engine_status.emit("Engine offline", "error")
 
     def showEvent(self, event: Any) -> None:  # noqa: N802 - Qt signature
