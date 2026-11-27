@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,7 +34,11 @@ from app.services.cloud_service import CloudAdapter
 from app.services.engine_service import EngineAdapter
 from app.services.model_service import ModelService
 from app.services.phone_remote_client import reset_phone_remote_client
-from app.services.server_service import shared_server_service
+import io
+import json
+import socket
+
+from app.services.server_service import lan_ip, shared_server_service
 from app.services.wan_remote_client import reset_wan_client
 from app.settings_repository import SettingsError, SettingsRepository
 from app.ui.theme import MODES, ThemeManager
@@ -593,12 +597,29 @@ class SettingsPage(QScrollArea):
         self._server_pin_btn.setEnabled(False)
         self._server_pin_btn.clicked.connect(self._on_server_pin)
         row.addWidget(self._server_pin_btn)
+
+        self._server_qr_btn = QPushButton("Show QR code")
+        self._server_qr_btn.setFixedHeight(32)
+        self._server_qr_btn.setEnabled(False)
+        self._server_qr_btn.clicked.connect(self._on_server_qr)
+        row.addWidget(self._server_qr_btn)
         layout.addLayout(row)
 
         self._server_pin_label = QLabel("Pairing PIN: —")
         self._server_pin_label.setObjectName("cardLabel")
         self._server_pin_label.setWordWrap(True)
         layout.addWidget(self._server_pin_label)
+
+        self._server_qr_label = QLabel()
+        self._server_qr_label.setAlignment(Qt.AlignCenter)
+        self._server_qr_label.setMinimumHeight(200)
+        self._server_qr_label.hide()
+        layout.addWidget(self._server_qr_label)
+
+        self._server_qr_status = QLabel("")
+        self._server_qr_status.setObjectName("cardLabel")
+        self._server_qr_status.setWordWrap(True)
+        layout.addWidget(self._server_qr_status)
 
         self._server_auto = QCheckBox("Start phone server with Maya")
         self._server_auto.setChecked(bool(self._repository.get("server.auto_start", False)))
@@ -804,11 +825,13 @@ class SettingsPage(QScrollArea):
             self._server_start_btn.setEnabled(False)
             self._server_stop_btn.setEnabled(True)
             self._server_pin_btn.setEnabled(True)
+            self._server_qr_btn.setEnabled(True)
         else:
             self._server_status.setText("Status: Stopped")
             self._server_start_btn.setEnabled(True)
             self._server_stop_btn.setEnabled(False)
             self._server_pin_btn.setEnabled(False)
+            self._server_qr_btn.setEnabled(False)
 
     def _on_server_auto_toggled(self, checked: bool) -> None:
         """Persist the checkbox immediately (no Start click required)."""
@@ -843,6 +866,7 @@ class SettingsPage(QScrollArea):
         self._server_start_btn.setEnabled(False)
         self._server_stop_btn.setEnabled(False)
         self._server_pin_btn.setEnabled(False)
+        self._server_qr_btn.setEnabled(False)
 
         worker = ServerStartWorker(svc, self)
         worker.finished_ok.connect(self._on_server_started)
@@ -863,6 +887,7 @@ class SettingsPage(QScrollArea):
         self._server_start_btn.setEnabled(False)
         self._server_stop_btn.setEnabled(True)
         self._server_pin_btn.setEnabled(True)
+        self._server_qr_btn.setEnabled(True)
         # persist auto_start (the checkbox is the user's intent, not the server)
         try:
             self._repository.update({"server.auto_start": self._server_auto.isChecked()})
@@ -875,6 +900,7 @@ class SettingsPage(QScrollArea):
         self._server_start_btn.setEnabled(True)
         self._server_stop_btn.setEnabled(False)
         self._server_pin_btn.setEnabled(False)
+        self._server_qr_btn.setEnabled(False)
 
     def _release_server_start_worker(self) -> None:
         """QThread finished (UI thread): drop the reference and free the thread."""
@@ -890,6 +916,7 @@ class SettingsPage(QScrollArea):
         self._server_start_btn.setEnabled(False)
         self._server_stop_btn.setEnabled(False)
         self._server_pin_btn.setEnabled(False)
+        self._server_qr_btn.setEnabled(False)
         self._server_status.setText("Status: Stopping...")
         if svc is not None:
             try:
@@ -899,6 +926,9 @@ class SettingsPage(QScrollArea):
         self._server = None
         self._server_status.setText("Status: Stopped")
         self._server_pin_label.setText("Pairing PIN: —")
+        self._server_qr_label.hide()
+        self._server_qr_label.clear()
+        self._server_qr_status.setText("")
         self._server_start_btn.setEnabled(True)
 
     def _on_server_pin(self) -> None:
@@ -913,6 +943,36 @@ class SettingsPage(QScrollArea):
             self._server_pin_label.setText(f"Pairing PIN: {pin}  (valid ~{minutes} min)")
         except Exception as exc:  # noqa: BLE001
             self._server_pin_label.setText(f"Pairing PIN: error — {exc}")
+
+    def _on_server_qr(self) -> None:
+        svc = self._server
+        if svc is None or not svc.running:
+            self._server_qr_status.setText("Start the phone server first.")
+            self._server_qr_label.hide()
+            return
+        try:
+            host = lan_ip() or (svc.host or "")
+            port = int(svc.bound_port or svc.port)
+            laptop_name = socket.gethostname() or "Maya-Laptop"
+            payload = svc.pairing.generate_qr(host, port, laptop_name)
+            import qrcode
+            img = qrcode.make(json.dumps(payload, separators=(",", ":")))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            qimg = QImage()
+            qimg.loadFromData(buf.getvalue(), "PNG")
+            pixmap = QPixmap.fromImage(qimg)
+            self._server_qr_label.setPixmap(
+                pixmap.scaled(220, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            self._server_qr_label.show()
+            self._server_qr_status.setText(
+                f"Scan this with the Maya phone app (Pairing → Scan QR). "
+                "Valid ~2 min, single use."
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._server_qr_label.hide()
+            self._server_qr_status.setText(f"QR error — {exc}")
 
     def _build_footer(self) -> None:
         row = QHBoxLayout()

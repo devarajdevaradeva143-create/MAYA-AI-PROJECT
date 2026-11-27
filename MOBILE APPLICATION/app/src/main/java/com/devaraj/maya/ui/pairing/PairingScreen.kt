@@ -125,7 +125,8 @@ fun PairingScreen(
                                 setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                                 setPrompt("Scan the Maya QR code")
                                 setBeepEnabled(false)
-                                setOrientationLocked(false)
+                                setOrientationLocked(true)
+                                setCaptureActivity(PortraitCaptureActivity::class.java)
                             },
                         )
                     },
