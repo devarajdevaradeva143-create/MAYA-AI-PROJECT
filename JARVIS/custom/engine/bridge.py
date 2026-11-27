@@ -137,10 +137,15 @@ class EngineBridge:
 
     # ── Direct (HTTP) mode ─────────────────────────────────────────
     def _extra_payload(self) -> dict[str, Any]:
-        """Settings-driven request options (currently just thinking mode)."""
+        """Settings-driven request options (currently just thinking mode).
+
+        Lemonade's OpenAI-compatible server rejects ``chat_template_kwargs``,
+        but honours ``reasoning_effort``. ``none`` disables thinking for
+        reasoning models (Qwen3/3.5) so the answer text is always produced.
+        """
         if not self.disable_thinking:
             return {}
-        return {"chat_template_kwargs": {"enable_thinking": False}}
+        return {"reasoning_effort": "none"}
 
     def _health_direct(self) -> dict[str, Any]:
         r = self._client.get(f"{self.host}/v1/models", timeout=10)
