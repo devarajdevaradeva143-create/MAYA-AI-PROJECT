@@ -22,12 +22,22 @@ class AQEngine:
         assistant_adapter,
         knowledge_adapter,
         monitor_adapter=None,
+        screen_adapter=None,
+        system_adapter=None,
+        browser_adapter=None,
+        files_adapter=None,
+        office_adapter=None,
         confirm_fn: Callable[[str], bool] | None = None,
     ):
         self._pc = pc_adapter
         self._assistant = assistant_adapter
         self._knowledge = knowledge_adapter
         self._monitor = monitor_adapter
+        self._screen = screen_adapter
+        self._system = system_adapter
+        self._browser = browser_adapter
+        self._files = files_adapter
+        self._office = office_adapter
         # Secure default: without an explicit confirmation callback,
         # destructive actions are denied instead of auto-approved.
         self._confirm = confirm_fn or (lambda msg: False)
@@ -63,6 +73,53 @@ class AQEngine:
             "schedule": self._handle_schedule,
             "monitor": self._handle_monitor,
             "knowledge": self._handle_knowledge,
+            # Screen control
+            "screenshot": self._handle_screenshot,
+            "screen_size": self._handle_screen_size,
+            "mouse_move": self._handle_mouse_move,
+            "mouse_click": self._handle_mouse_click,
+            "mouse_scroll": self._handle_mouse_scroll,
+            "keyboard_type": self._handle_keyboard_type,
+            "press_key": self._handle_press_key,
+            # System control
+            "get_volume": self._handle_get_volume,
+            "set_volume": self._handle_set_volume,
+            "mute_toggle": self._handle_mute_toggle,
+            "get_brightness": self._handle_get_brightness,
+            "set_brightness": self._handle_set_brightness,
+            "lock_screen": self._handle_lock_screen,
+            "sleep_pc": self._handle_sleep_pc,
+            "shutdown_pc": self._handle_shutdown_pc,
+            "restart_pc": self._handle_restart_pc,
+            "cancel_shutdown": self._handle_cancel_shutdown,
+            # Clipboard
+            "read_clipboard": self._handle_read_clipboard,
+            "write_clipboard": self._handle_write_clipboard,
+            # Window
+            "list_windows": self._handle_list_windows,
+            "focus_window": self._handle_focus_window,
+            "minimize_all": self._handle_minimize_all,
+            "close_window": self._handle_close_window,
+            # Process
+            "list_processes": self._handle_list_processes,
+            "kill_process": self._handle_kill_process,
+            "set_priority": self._handle_set_priority,
+            # Browser
+            "open_url": self._handle_open_url,
+            "search_web": self._handle_search_web,
+            "fetch_page": self._handle_fetch_page,
+            # Files advanced
+            "move_file": self._handle_move_file,
+            "copy_file": self._handle_copy_file,
+            "rename_file": self._handle_rename_file,
+            "zip_path": self._handle_zip_path,
+            "unzip_path": self._handle_unzip_path,
+            "search_content": self._handle_search_content,
+            # Office
+            "excel_write": self._handle_excel_write,
+            "excel_read": self._handle_excel_read,
+            "word_create_doc": self._handle_word_create_doc,
+            "word_add_text": self._handle_word_add_text,
         }
 
         if intent_lower in intent_map:
@@ -336,3 +393,346 @@ class AQEngine:
             result = self._knowledge.index_documents(paths)
             return AQResult(True, result, True, "Documents indexed")
         return AQResult(False, None, False, f"Unknown knowledge action: {action}")
+    # ---- Screen control handlers ----
+    def _handle_screenshot(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        result = self._screen.screenshot(params.get("path"))
+        return AQResult(success=result.get("success", False), result=result.get("path", ""),
+                       verified=result.get("verified", False), message="Screenshot captured")
+
+    def _handle_screen_size(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        result = self._screen.get_screen_size()
+        return AQResult(True, result, True, "Screen size retrieved")
+
+    def _handle_mouse_move(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        x = params.get("x", 0); y = params.get("y", 0)
+        result = self._screen.mouse_move(x, y)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_mouse_click(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        result = self._screen.mouse_click(params.get("x"), params.get("y"),
+                                         params.get("button", "left"), params.get("clicks", 1))
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_mouse_scroll(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        result = self._screen.mouse_scroll(params.get("amount", 0))
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_keyboard_type(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        text = params.get("text", "")
+        if not text:
+            return AQResult(False, None, False, "Text required")
+        result = self._screen.keyboard_type(text)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_press_key(self, params: dict) -> AQResult:
+        if not self._screen:
+            return AQResult(False, None, False, "Screen adapter not available")
+        key = params.get("key", "")
+        if not key:
+            return AQResult(False, None, False, "Key required")
+        result = self._screen.press_key(key)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    # ---- System control handlers ----
+    def _handle_get_volume(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        return AQResult(True, self._system.get_volume(), True, "Volume retrieved")
+
+    def _handle_set_volume(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        level = params.get("level", params.get("value", 50))
+        result = self._system.set_volume(level)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_mute_toggle(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.mute_toggle()
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_get_brightness(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        return AQResult(True, self._system.get_brightness(), True, "Brightness retrieved")
+
+    def _handle_set_brightness(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        level = params.get("level", params.get("value", 50))
+        result = self._system.set_brightness(level)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_lock_screen(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.lock_workstation()
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_sleep_pc(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.sleep_pc()
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_shutdown_pc(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.shutdown_pc()
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_restart_pc(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.restart_pc()
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_cancel_shutdown(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.cancel_shutdown()
+        return AQResult(success=True, result=result.get("result", ""), verified=True,
+                       message=result.get("result", ""))
+
+    # ---- Clipboard handlers ----
+    def _handle_read_clipboard(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        content = self._system.read_clipboard()
+        return AQResult(True, content, True, "Clipboard read")
+
+    def _handle_write_clipboard(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        text = params.get("text", "")
+        if not text:
+            return AQResult(False, None, False, "Text required")
+        result = self._system.write_clipboard(text)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    # ---- Window handlers ----
+    def _handle_list_windows(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        windows = self._system.list_windows()
+        return AQResult(True, windows, True, f"{len(windows)} windows")
+
+    def _handle_focus_window(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        title = params.get("title", params.get("name", ""))
+        if not title:
+            return AQResult(False, None, False, "Window title required")
+        result = self._system.focus_window(title)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_minimize_all(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        result = self._system.minimize_all()
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_close_window(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        title = params.get("title", params.get("name", ""))
+        if not title:
+            return AQResult(False, None, False, "Window title required")
+        result = self._system.close_window(title)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    # ---- Process handlers ----
+    def _handle_list_processes(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        procs = self._system.list_processes(params.get("filter", params.get("name", "")))
+        return AQResult(True, procs, True, f"{len(procs)} processes")
+
+    def _handle_kill_process(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        target = params.get("target", params.get("name", params.get("pid", "")))
+        if not target:
+            return AQResult(False, None, False, "Process name/pid required")
+        result = self._system.kill_process(target)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_set_priority(self, params: dict) -> AQResult:
+        if not self._system:
+            return AQResult(False, None, False, "System adapter not available")
+        target = params.get("target", params.get("name", params.get("pid", "")))
+        priority = params.get("priority", "normal")
+        if not target:
+            return AQResult(False, None, False, "Process name/pid required")
+        result = self._system.set_priority(target, priority)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+    # ---- Browser handlers ----
+    def _handle_open_url(self, params: dict) -> AQResult:
+        if not self._browser:
+            return AQResult(False, None, False, "Browser adapter not available")
+        url = params.get("url", params.get("link", ""))
+        if not url:
+            return AQResult(False, None, False, "URL required")
+        result = self._browser.open_url(url)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_search_web(self, params: dict) -> AQResult:
+        if not self._browser:
+            return AQResult(False, None, False, "Browser adapter not available")
+        query = params.get("query", params.get("q", ""))
+        if not query:
+            return AQResult(False, None, False, "Query required")
+        result = self._browser.search_web(query)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_fetch_page(self, params: dict) -> AQResult:
+        if not self._browser:
+            return AQResult(False, None, False, "Browser adapter not available")
+        url = params.get("url", params.get("link", ""))
+        if not url:
+            return AQResult(False, None, False, "URL required")
+        result = self._browser.fetch_page(url)
+        return AQResult(success=result.get("success", False), result=result.get("content", ""),
+                       verified=result.get("verified", False), message="Page fetched")
+
+    # ---- File advanced handlers ----
+    def _handle_move_file(self, params: dict) -> AQResult:
+        if not self._files:
+            return AQResult(False, None, False, "Files adapter not available")
+        src = params.get("src", params.get("source", params.get("path", "")))
+        dst = params.get("dst", params.get("destination", ""))
+        if not src or not dst:
+            return AQResult(False, None, False, "Source and destination required")
+        result = self._files.move_file(src, dst)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_copy_file(self, params: dict) -> AQResult:
+        if not self._files:
+            return AQResult(False, None, False, "Files adapter not available")
+        src = params.get("src", params.get("source", params.get("path", "")))
+        dst = params.get("dst", params.get("destination", ""))
+        if not src or not dst:
+            return AQResult(False, None, False, "Source and destination required")
+        result = self._files.copy_file(src, dst)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_rename_file(self, params: dict) -> AQResult:
+        if not self._files:
+            return AQResult(False, None, False, "Files adapter not available")
+        path = params.get("path", "")
+        new_name = params.get("new_name", params.get("name", ""))
+        if not path or not new_name:
+            return AQResult(False, None, False, "Path and new name required")
+        result = self._files.rename_file(path, new_name)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_zip_path(self, params: dict) -> AQResult:
+        if not self._files:
+            return AQResult(False, None, False, "Files adapter not available")
+        path = params.get("path", "")
+        if not path:
+            return AQResult(False, None, False, "Path required")
+        result = self._files.zip_path(path, params.get("out_zip"))
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_unzip_path(self, params: dict) -> AQResult:
+        if not self._files:
+            return AQResult(False, None, False, "Files adapter not available")
+        zp = params.get("zip_path", params.get("path", ""))
+        if not zp:
+            return AQResult(False, None, False, "Zip path required")
+        result = self._files.unzip_path(zp, params.get("dst"))
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_search_content(self, params: dict) -> AQResult:
+        if not self._files:
+            return AQResult(False, None, False, "Files adapter not available")
+        directory = params.get("directory", params.get("path", ""))
+        query = params.get("query", params.get("q", ""))
+        if not directory or not query:
+            return AQResult(False, None, False, "Directory and query required")
+        results = self._files.search_content(directory, query, params.get("ext", ""))
+        return AQResult(True, results, True, f"{len(results)} files")
+
+    # ---- Office handlers ----
+    def _handle_excel_write(self, params: dict) -> AQResult:
+        if not self._office:
+            return AQResult(False, None, False, "Office adapter not available")
+        path = params.get("path", "")
+        cell = params.get("cell", "")
+        value = params.get("value", params.get("text", ""))
+        if not path or not cell:
+            return AQResult(False, None, False, "Path and cell required")
+        result = self._office.excel_write(path, cell, value)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_excel_read(self, params: dict) -> AQResult:
+        if not self._office:
+            return AQResult(False, None, False, "Office adapter not available")
+        path = params.get("path", "")
+        rng = params.get("range", params.get("cell", "A1"))
+        if not path:
+            return AQResult(False, None, False, "Path required")
+        content = self._office.excel_read(path, rng)
+        return AQResult(True, content, True, "Excel read")
+
+    def _handle_word_create_doc(self, params: dict) -> AQResult:
+        if not self._office:
+            return AQResult(False, None, False, "Office adapter not available")
+        path = params.get("path", "")
+        if not path:
+            return AQResult(False, None, False, "Path required")
+        text = params.get("text", params.get("content", ""))
+        result = self._office.word_create_doc(path, text)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))
+
+    def _handle_word_add_text(self, params: dict) -> AQResult:
+        if not self._office:
+            return AQResult(False, None, False, "Office adapter not available")
+        path = params.get("path", "")
+        text = params.get("text", params.get("content", ""))
+        if not path or not text:
+            return AQResult(False, None, False, "Path and text required")
+        result = self._office.word_add_text(path, text)
+        return AQResult(success=result.get("success", False), result=result.get("result", ""),
+                       verified=result.get("verified", False), message=result.get("result", ""))

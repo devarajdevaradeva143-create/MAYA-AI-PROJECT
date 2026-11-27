@@ -1,6 +1,23 @@
 """Cognitive Intelligence (IQ) engine — answers and plans via engine + RAG."""
 
+import json
+import re
 from dataclasses import dataclass
+
+#: Intents the agent is allowed to execute autonomously.
+AGENT_ALLOWED_INTENTS = {
+    "open_app", "close_app", "search_files", "read_file", "create_folder",
+    "delete_file", "edit_file", "run_command", "todo", "reminder", "schedule",
+    "monitor", "knowledge", "screenshot", "screen_size", "mouse_move",
+    "mouse_click", "mouse_scroll", "keyboard_type", "press_key", "get_volume",
+    "set_volume", "mute_toggle", "get_brightness", "set_brightness",
+    "lock_screen", "sleep_pc", "shutdown_pc", "restart_pc", "cancel_shutdown",
+    "read_clipboard", "write_clipboard", "list_windows", "focus_window",
+    "minimize_all", "close_window", "list_processes", "kill_process",
+    "set_priority", "open_url", "search_web", "fetch_page", "move_file",
+    "copy_file", "rename_file", "zip_path", "unzip_path", "search_content",
+    "excel_write", "excel_read", "word_create_doc", "word_add_text",
+}
 
 
 @dataclass
@@ -105,6 +122,59 @@ class IQEngine:
                 if cleaned:
                     steps.append(cleaned)
         return steps if steps else [task]
+
+    def plan_actions(self, goal: str, context: str = "", language_directive: str = "") -> list[dict]:
+        """Plan a multi-step task as executable actions (JSON)."""
+        allowed = ", ".join(sorted(AGENT_ALLOWED_INTENTS))
+        system_parts = [
+            self._persona,
+            "You are an action planner for a PC-control assistant.",
+            "Break the user's goal into concrete, executable steps.",
+            "Each step must be one of these intents: " + allowed + ".",
+            "Respond with ONLY a JSON array. No markdown, no prose, no code fences.",
+            'Each element: {"intent": "<intent>", "params": {<params>}, "description": "<short>"}',
+            "Maximum 8 steps.",
+        ]
+        if language_directive:
+            system_parts.append(f"[Response language] {language_directive}")
+        if context:
+            system_parts.append(f"[Context]\n{context}")
+        system_prompt = "\n\n".join(system_parts)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": goal},
+        ]
+        result = self._engine.chat(messages)
+        text = (result.text or "").strip()
+
+        parsed = None
+        candidates = [text]
+        m = re.search(r"\[.*\]", text, re.S)
+        if m:
+            candidates.append(m.group(0))
+        for cand in candidates:
+            try:
+                parsed = json.loads(cand)
+                break
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if not isinstance(parsed, list):
+            return []
+
+        actions = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            intent = str(item.get("intent", "")).strip().lower()
+            if intent not in AGENT_ALLOWED_INTENTS:
+                continue
+            params = item.get("params", {})
+            if not isinstance(params, dict):
+                params = {}
+            desc = str(item.get("description", "")).strip()
+            actions.append({"intent": intent, "params": params, "description": desc})
+        return actions[:8]
 
     @staticmethod
     def _trim_history(history: list[dict[str, str]], limit: int = 6) -> list[dict[str, str]]:

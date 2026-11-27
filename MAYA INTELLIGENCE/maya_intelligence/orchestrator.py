@@ -158,6 +158,23 @@ class Orchestrator:
         self._knowledge = KnowledgeAdapter()
         self._language = LanguageAdapter()
         self._voice = VoiceAdapter()
+        try:
+            from maya_intelligence.adapters.screen import ScreenAdapter
+            from maya_intelligence.adapters.system import SystemAdapter
+            from maya_intelligence.adapters.browser import BrowserAdapter
+            from maya_intelligence.adapters.files import FilesAdapter
+            from maya_intelligence.adapters.office import OfficeAdapter
+            self._screen = ScreenAdapter()
+            self._system = SystemAdapter()
+            self._browser = BrowserAdapter()
+            self._files = FilesAdapter()
+            self._office = OfficeAdapter()
+        except Exception:
+            self._screen = None
+            self._system = None
+            self._browser = None
+            self._files = None
+            self._office = None
 
         # Wrap confirm_fn for pc_control gate (expects action, item)
         def gate_confirm(action: str, item: str) -> bool:
@@ -170,14 +187,29 @@ class Orchestrator:
         self._iq = IQEngine(self._engine, self._knowledge, self._persona)
         self._eq = EQEngine()
         # AQ uses original confirm_fn (single message), pc_control uses gate_confirm (action, item)
-        self._aq = AQEngine(self._pc, self._assistant, self._knowledge, confirm_fn=confirm_fn)
+        self._aq = AQEngine(self._pc, self._assistant, self._knowledge,
+                            monitor_adapter=None,
+                            screen_adapter=self._screen,
+                            system_adapter=self._system,
+                            browser_adapter=self._browser,
+                            files_adapter=self._files,
+                            office_adapter=self._office,
+                            confirm_fn=confirm_fn)
 
-        # Wire pc_control permission gate
+        # Wire permission gates (pc + screen + system + clipboard + window + process)
         try:
             from custom.tools import pc_control
             pc_control.set_permission_gate(gate_confirm)
         except Exception:
             pass
+        for modname in ("screen_control", "system_control", "clipboard", "window_control",
+                        "process_control", "browser_control", "file_advanced", "office_control"):
+            try:
+                mod = __import__("custom.tools." + modname, fromlist=[modname])
+                if hasattr(mod, "set_permission_gate"):
+                    mod.set_permission_gate(gate_confirm)
+            except Exception:
+                pass
 
         # Memory
         self._memory = MemoryStore(Path(db_path) if db_path else get_db_path())
@@ -228,6 +260,13 @@ class Orchestrator:
             if answer:
                 self._record_turn(text, answer)
                 return OrchestratorResult(answer, intent, "memory_recall", True, False)
+
+        # Agent mode: multi-step autonomous execution
+        if intent == "agent":
+            response = self._run_agent(text, language)
+            self._record_turn(text, response)
+            facts = self._maybe_save_conversation_memory(text, response)
+            return OrchestratorResult(response, intent, "agent_run", True, bool(facts))
 
         # STEP 6: PLANNING
         if intent == "plan":
@@ -321,6 +360,12 @@ class Orchestrator:
         if re.match(r"^(?:plan|make a plan|give me \d+ steps?|steps? to)\b", t):
             return "plan"
 
+        # Agentic: explicit agent keyword or multi-step chain
+        if re.search(r"\b(agent|automate|step by step|do this for me|chain)\b", t):
+            return "agent"
+        if re.search(r"\b(open|create|delete|edit|run|search|read|move|copy|zip|type|press|click|scroll)\b.*\b(and|then|,)\b.*(open|create|delete|edit|run|search|read|move|copy|zip|type|press|click|scroll)\b", t):
+            return "agent"
+
         # ── File operations before app operations ("open file X" is a read)
         if re.search(r"\b(search|find|thedu)\b", t) and re.search(
             r"\b(file|files|folder|folders|document|documents)\b", t
@@ -352,15 +397,117 @@ class Orchestrator:
                 "explorer" not in t and "folder" not in t:
             return "read_file"
 
-        # ── App actions (English + "X open pannu")
+        # ── open_url should win over open_app
+        if re.search(r"\bopen (?:url|link)\b", t) or re.search(r"\bvisit\b", t):
+            return "open_url"
+
+        # App actions (English + "X open pannu")
         if re.search(r"\b(open|launch|start)\b", t) or re.search(
             r"\b(open|launch)\s+(pannu|pannunga|pannuda)\b", t
         ):
             return "open_app"
+        # Kill process must be detected before generic close_app
+        if re.search(r"\bkill (?:process|task)\b", t):
+            return "kill_process"
+
         if re.search(r"\b(close|quit|kill)\b", t) or re.search(
             r"\b(close|quit)\s+(pannu|pannunga|pannuda)\b", t
         ):
             return "close_app"
+
+        # Screen control
+        if re.search(r"\bscreenshot\b|\bscreen shot\b|\bcapture screen\b", t):
+            return "screenshot"
+        if re.search(r"\bscreen size\b|\bdisplay (?:size|resolution)\b", t):
+            return "screen_size"
+        if re.search(r"\bmouse (?:move|cursor)\b", t):
+            return "mouse_move"
+        if re.search(r"\b(click|double click|right click)\b", t) and re.search(r"\b(mouse|screen|at \d)\b", t):
+            return "mouse_click"
+        if re.search(r"\btype (?:text|this|on screen)\b", t) or re.search(r"\bkeyboard type\b", t):
+            return "keyboard_type"
+        if re.search(r"\bpress (?:key|enter|tab|esc|escape)\b", t):
+            return "press_key"
+        if re.search(r"\bscroll\b", t) and re.search(r"\b(mouse|screen|up|down)\b", t):
+            return "mouse_scroll"
+
+        # System control
+        if re.search(r"\b(volume|mute)\b", t):
+            if re.search(r"\b(set|change|increase|decrease|raise|lower)\b", t) or re.search(r"\d", t):
+                return "set_volume"
+            if re.search(r"\bmute\b", t):
+                return "mute_toggle"
+            return "get_volume"
+        if re.search(r"\bbrightness\b", t):
+            if re.search(r"\b(set|change)\b", t) or re.search(r"\d", t):
+                return "set_brightness"
+            return "get_brightness"
+        if re.search(r"\block (?:screen|pc|workstation|computer)\b", t):
+            return "lock_screen"
+        if re.search(r"\bsleep\b", t) and re.search(r"\b(pc|computer|system|laptop)\b", t):
+            return "sleep_pc"
+        if re.search(r"\b(shutdown|shut down|power off)\b", t):
+            return "shutdown_pc"
+        if re.search(r"\brestart\b", t) or re.search(r"\breboot\b", t):
+            return "restart_pc"
+        if re.search(r"\bcancel shutdown\b", t):
+            return "cancel_shutdown"
+
+        # Clipboard
+        if re.search(r"\bclipboard\b", t):
+            if re.search(r"\b(write|copy|set|put)\b", t):
+                return "write_clipboard"
+            return "read_clipboard"
+
+        # Window management
+        if re.search(r"\blist windows\b|\bshow windows\b|\bopen windows\b", t):
+            return "list_windows"
+        if re.search(r"\bfocus window\b|\bactivate window\b", t):
+            return "focus_window"
+        if re.search(r"\bminimize all\b|\bshow desktop\b", t):
+            return "minimize_all"
+        if re.search(r"\bclose window\b", t):
+            return "close_window"
+
+        # Process management
+        if re.search(r"\blist processes\b|\bshow processes\b|\brunning processes\b", t):
+            return "list_processes"
+        if re.search(r"\bkill (?:process|task)\b", t):
+            return "kill_process"
+        if re.search(r"\bset priority\b", t):
+            return "set_priority"
+
+        # Browser control
+        if re.search(r"\bopen url\b|\bopen link\b|\bvisit\b", t):
+            return "open_url"
+        if re.search(r"\bsearch (?:web|google|online)\b", t):
+            return "search_web"
+        if re.search(r"\bfetch (?:page|url|website)\b|\bscrape\b", t):
+            return "fetch_page"
+
+        # Advanced file ops
+        if re.search(r"\bmove file\b|\bmove folder\b", t):
+            return "move_file"
+        if re.search(r"\bcopy file\b|\bcopy folder\b", t):
+            return "copy_file"
+        if re.search(r"\brename (?:file|folder)\b", t):
+            return "rename_file"
+        if re.search(r"\bzip\b", t) and re.search(r"\b(file|folder)\b", t):
+            return "zip_path"
+        if re.search(r"\bunzip\b", t):
+            return "unzip_path"
+        if re.search(r"\bsearch (?:content|inside files|text in files)\b", t):
+            return "search_content"
+
+        # Office control
+        if re.search(r"\bexcel (?:write|set)\b", t):
+            return "excel_write"
+        if re.search(r"\bexcel (?:read|get)\b", t):
+            return "excel_read"
+        if re.search(r"\bword (?:create|new|make)\b", t):
+            return "word_create_doc"
+        if re.search(r"\bword (?:add|append)\b", t):
+            return "word_add_text"
 
         # ── Productivity
         if re.search(r"\b(to-?do|task)\b", t) and re.search(
@@ -834,6 +981,120 @@ class Orchestrator:
             value = re.sub(r"\s+", " ", value)
             return value.strip()
 
+        # Screen control params
+        if intent == "mouse_move":
+            m = re.search(r"(\d+)\s*[,\s]+\s*(\d+)", text)
+            if m:
+                params["x"] = int(m.group(1)); params["y"] = int(m.group(2))
+        elif intent == "mouse_click":
+            m = re.search(r"(\d+)\s*[,\s]+\s*(\d+)", text)
+            if m:
+                params["x"] = int(m.group(1)); params["y"] = int(m.group(2))
+            if re.search(r"right", text, re.I):
+                params["button"] = "right"
+            elif re.search(r"middle", text, re.I):
+                params["button"] = "middle"
+            else:
+                params["button"] = "left"
+        elif intent == "mouse_scroll":
+            m = re.search(r"(-?\d+)", text)
+            if m:
+                params["amount"] = int(m.group(1))
+        elif intent == "keyboard_type":
+            val = re.sub(r"^.*?(?:type|keyboard type)\s*", "", text, flags=re.I).strip()
+            params["text"] = val or text
+        elif intent == "press_key":
+            m = re.search(r"press\s+(?:key\s+)?(.+)", text, re.I)
+            params["key"] = (m.group(1).strip() if m else text).strip(" .,!?'")
+        elif intent == "set_volume":
+            m = re.search(r"(\d+)", text)
+            if m:
+                params["level"] = int(m.group(1))
+        elif intent == "set_brightness":
+            m = re.search(r"(\d+)", text)
+            if m:
+                params["level"] = int(m.group(1))
+        elif intent == "focus_window" or intent == "close_window":
+            val = re.sub(r"^.*?(?:focus|activate|close)\s+window\s*", "", text, flags=re.I).strip()
+            params["title"] = val or text
+        elif intent == "write_clipboard":
+            val = re.sub(r"^.*?(?:write|copy|set|put)\s+(?:to\s+)?clipboard\s*", "", text, flags=re.I).strip()
+            params["text"] = val or text
+        elif intent == "list_processes":
+            val = re.sub(r"^.*?(?:list|show|running)\s+processes?\s*", "", text, flags=re.I).strip()
+            if val:
+                params["filter"] = val
+        elif intent == "kill_process":
+            val = re.sub(r"^.*?kill\s+(?:process|task)\s*", "", text, flags=re.I).strip()
+            params["target"] = val or text
+        elif intent == "set_priority":
+            m = re.search(r"priority\s+(\w+)", text, re.I)
+            if m:
+                params["priority"] = m.group(1)
+            val = re.sub(r"^.*?set priority\s*", "", text, flags=re.I).strip()
+            params["target"] = val or text
+
+        # Browser params
+        if intent == "open_url":
+            m = re.search(r"(?:open url|open link|visit)\s+(.+)", text, re.I)
+            params["url"] = (m.group(1).strip() if m else text).strip(" .,!?'\"")
+        elif intent == "search_web":
+            m = re.search(r"search (?:web|google|online)\s+(.+)", text, re.I)
+            params["query"] = (m.group(1).strip() if m else text).strip(" .,!?'\"")
+        elif intent == "fetch_page":
+            m = re.search(r"fetch (?:page|url|website)\s+(.+)", text, re.I)
+            params["url"] = (m.group(1).strip() if m else text).strip(" .,!?'\"")
+
+        # Advanced file params
+        elif intent == "move_file":
+            m = re.search(r"move (?:file|folder)\s+(.+?)\s+(?:to)\s+(.+)", text, re.I)
+            if m:
+                params["src"] = m.group(1).strip(); params["dst"] = m.group(2).strip()
+        elif intent == "copy_file":
+            m = re.search(r"copy (?:file|folder)\s+(.+?)\s+(?:to)\s+(.+)", text, re.I)
+            if m:
+                params["src"] = m.group(1).strip(); params["dst"] = m.group(2).strip()
+        elif intent == "rename_file":
+            m = re.search(r"rename (?:file|folder)\s+(.+?)\s+(?:to|as)\s+(.+)", text, re.I)
+            if m:
+                params["path"] = m.group(1).strip(); params["new_name"] = m.group(2).strip()
+        elif intent == "zip_path":
+            m = re.search(r"zip\s+(.+)", text, re.I)
+            if m:
+                params["path"] = m.group(1).strip()
+        elif intent == "unzip_path":
+            m = re.search(r"unzip\s+(.+)", text, re.I)
+            if m:
+                params["zip_path"] = m.group(1).strip()
+        elif intent == "search_content":
+            m = re.search(r"search (?:content|inside files|text in files)\s+(.+)", text, re.I)
+            if m:
+                params["query"] = m.group(1).strip()
+            params["directory"] = "."
+
+        # Office params
+        elif intent == "excel_write":
+            m = re.search(r"excel (?:write|set)\s+(\S+)\s+(\S+)\s+(.+)", text, re.I)
+            if m:
+                params["path"] = m.group(1).strip()
+                params["cell"] = m.group(2).strip()
+                params["value"] = m.group(3).strip()
+        elif intent == "excel_read":
+            m = re.search(r"excel (?:read|get)\s+(\S+)(?:\s+(\S+))?", text, re.I)
+            if m:
+                params["path"] = m.group(1).strip()
+                params["range"] = (m.group(2) or "A1").strip()
+        elif intent == "word_create_doc":
+            m = re.search(r"word (?:create|new|make)\s+(\S+)(?:\s+(.+))?", text, re.I)
+            if m:
+                params["path"] = m.group(1).strip()
+                params["text"] = (m.group(2) or "").strip()
+        elif intent == "word_add_text":
+            m = re.search(r"word (?:add|append)\s+(\S+)\s+(.+)", text, re.I)
+            if m:
+                params["path"] = m.group(1).strip()
+                params["text"] = m.group(2).strip()
+
         if intent in {"open_app", "close_app"}:
             verbs = "open|launch|start|close|quit|kill"
             # "notepad open pannu"
@@ -1177,6 +1438,11 @@ class Orchestrator:
         self._aq._pc = self._pc
         self._aq._assistant = self._assistant
         self._aq._knowledge = self._knowledge
+        self._aq._screen = self._screen
+        self._aq._system = self._system
+        self._aq._browser = self._browser
+        self._aq._files = self._files
+        self._aq._office = self._office
 
     def _detect_language(self, text: str) -> str:
         try:
@@ -1221,6 +1487,70 @@ class Orchestrator:
             "memory": "ok",
             "memory_stats": self.get_memory_stats(),
         }
+
+    def _run_agent(self, goal: str, language: str) -> str:
+        """Execute a multi-step goal autonomously with verification."""
+        context = self._build_context(goal, "agent")
+        lang_dir = language_directive(language)
+        actions = self._iq.plan_actions(goal, context, lang_dir)
+
+        if not actions:
+            # Fallback: text plan only, no execution
+            steps = self._iq.plan(goal, context, lang_dir)
+            return self._format_plan(steps, language) + "\n\n(Auto-execution unavailable; plan shown only.)"
+
+        lines = ["Agent plan:"]
+        for i, a in enumerate(actions, start=1):
+            lines.append(f"{i}. {a.get('description') or a['intent']} ({a['intent']})")
+        lines.append("")
+        lines.append("Executing...")
+
+        results = []
+        for idx, action in enumerate(actions, start=1):
+            intent = action["intent"]
+            params = action.get("params", {}) or {}
+            lines.append(f"Step {idx}: {intent} ...")
+            try:
+                aq = self._aq.execute(intent, params)
+            except Exception as e:
+                aq = None
+                err = str(e)
+                lines.append(f"  -> error: {err}")
+                results.append((intent, False, err))
+                break
+            if aq is None:
+                lines.append("  -> no result")
+                break
+            ok = bool(getattr(aq, "success", False))
+            verified = bool(getattr(aq, "verified", False))
+            msg = getattr(aq, "message", "") or ""
+            lines.append(f"  -> {'OK' if ok else 'FAIL'}: {msg}")
+            results.append((intent, ok, msg))
+            if not ok:
+                # one replan attempt for this step
+                try:
+                    alt_actions = self._iq.plan_actions(
+                        f"Alternative for failed step: {intent} {params}. Goal: {goal}",
+                        context, lang_dir)
+                    if alt_actions:
+                        alt = alt_actions[0]
+                        lines.append(f"  -> retrying with {alt['intent']} ...")
+                        aq2 = self._aq.execute(alt["intent"], alt.get("params", {}) or {})
+                        ok2 = bool(getattr(aq2, "success", False))
+                        lines.append(f"  -> retry {'OK' if ok2 else 'FAIL'}: {getattr(aq2,'message','')}")
+                        results.append((alt["intent"], ok2, getattr(aq2, "message", "")))
+                        if not ok2:
+                            break
+                        continue
+                except Exception:
+                    pass
+                break
+
+        # Summary
+        done = sum(1 for r in results if r[1])
+        lines.append("")
+        lines.append(f"Completed {done}/{len(results)} steps.")
+        return "\n".join(lines)
 
     def close(self) -> None:
         """Clean up resources."""
