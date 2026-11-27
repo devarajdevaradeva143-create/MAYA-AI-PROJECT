@@ -410,7 +410,8 @@ class AQEngine:
     def _handle_mouse_move(self, params: dict) -> AQResult:
         if not self._screen:
             return AQResult(False, None, False, "Screen adapter not available")
-        x = params.get("x", 0); y = params.get("y", 0)
+        x = params.get("x", 0)
+        y = params.get("y", 0)
         result = self._screen.mouse_move(x, y)
         return AQResult(success=result.get("success", False), result=result.get("result", ""),
                        verified=result.get("verified", False), message=result.get("result", ""))

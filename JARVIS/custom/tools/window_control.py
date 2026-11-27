@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from typing import Callable, Optional
 
 _GATE = None
 _GATE_LOCK = threading.RLock()
@@ -64,4 +63,3 @@ def close_window(title: str) -> str:
 
 
 __all__ = ["list_windows", "focus_window", "minimize_all", "close_window", "set_permission_gate"]
-PYEOF

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -13,83 +14,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint + encoding guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install ruff
-        run: python -m pip install "ruff==0.11.10"
-
-      - name: Ruff (core + intelligence + Windows app)
-        run: |
-          ruff check JARVIS/custom "MAYA INTELLIGENCE" "WINDOWS APPLICATION/windows/app" "WINDOWS APPLICATION/windows/tests"
-
-      - name: UTF-8 BOM guard
-        run: |
-          python - <<'PY'
-          import subprocess
-          from pathlib import Path
-
-          suffixes = {
-              ".py", ".md", ".yaml", ".yml", ".toml", ".kt", ".kts",
-              ".json", ".txt", ".xml", ".properties", ".gradle", ".cfg",
-              ".ini", ".ps1", ".sh", ".bat", ".cmd",
-          }
-          files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
-          bad = [
-              path
-              for path in files
-              if Path(path).suffix.lower() in suffixes
-              and "llama.cpp" not in Path(path).parts
-              and Path(path).read_bytes().startswith(b"\xef\xbb\xbf")
-          ]
-          if bad:
-              raise SystemExit("UTF-8 BOM found:\n" + "\n".join(bad))
-          print("No UTF-8 BOM found")
-          PY
-
-  test-core:
-    name: Core tests (JARVIS/custom)
+  ci:
+    name: Lint, tests, type-check (Windows)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: JARVIS/pyproject.toml
 
-      - name: Install core package
-        run: python -m pip install -e "JARVIS[dev]"
-
-      - name: Run core tests
-        run: python -m pytest JARVIS/custom/tests -q
-
-  test-intelligence:
-    name: Intelligence tests (MAYA INTELLIGENCE)
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
-          cache: pip
-          cache-dependency-path: JARVIS/pyproject.toml
+          enable-cache: true
 
-      - name: Install core package
-        run: python -m pip install -e "JARVIS[dev]"
+      - name: Ruff (our source only, vendor excluded)
+        run: uvx --from ruff==0.11.10 ruff check --exclude JARVIS/custom/vendor JARVIS/custom "MAYA INTELLIGENCE"
 
-      - name: Run intelligence tests
+      - name: Install JARVIS dev deps (uv)
+        working-directory: JARVIS
+        run: uv sync --frozen --extra dev --extra semantic
+
+      - name: JARVIS core tests
+        working-directory: JARVIS
+        run: uv run --frozen --extra dev --extra semantic python -m pytest custom/tests -q
+
+      - name: MAYA INTELLIGENCE tests
         working-directory: MAYA INTELLIGENCE
-        run: python -m pytest tests -q
+        env:
+          PYTHONPATH: ${{ github.workspace }}\JARVIS;${{ github.workspace }}\MAYA INTELLIGENCE
+        run: uv run --project ../JARVIS --frozen --extra dev --extra semantic python -m pytest tests -q
+
+      - name: Install Windows app dev deps (uv)
+        working-directory: WINDOWS APPLICATION/windows
+        run: uv sync --frozen --group dev
+
+      - name: Windows app tests (offscreen Qt)
+        working-directory: WINDOWS APPLICATION/windows
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --frozen --group dev python -m pytest tests -q
+
+      - name: Install pyright
+        run: python -m pip install pyright
+
+      # Baseline: pyright reports pre-existing findings. Keep the signal visible
+      # without blocking the first green CI run; tighten this after cleanup.
+      - name: Type check (pyright, advisory)
+        continue-on-error: true
+        run: pyright

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from typing import Callable, Optional
 
 _GATE = None
 _GATE_LOCK = threading.RLock()
@@ -83,4 +82,3 @@ def word_add_text(path: str, text: str) -> str:
 
 
 __all__ = ["excel_write", "excel_read", "word_create_doc", "word_add_text", "set_permission_gate"]
-PYEOF

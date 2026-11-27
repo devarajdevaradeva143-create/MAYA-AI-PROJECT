@@ -19,7 +19,9 @@ android {
 
     defaultConfig {
         applicationId = "com.devaraj.maya"
-        minSdk = 36
+        // 26 is the floor: P2pSignal/P2pManager use java.util.Base64, which is API 26+
+        // and core-library desugaring is not enabled here.
+        minSdk = 26
         targetSdk = 36
         versionCode = 2
         versionName = "0.2.0"
@@ -47,7 +49,8 @@ android {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

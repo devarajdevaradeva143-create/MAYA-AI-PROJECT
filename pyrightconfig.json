@@ -1,0 +1,21 @@
+{
+  "include": [
+    "JARVIS/custom",
+    "MAYA INTELLIGENCE/maya_intelligence",
+    "WINDOWS APPLICATION/windows/app"
+  ],
+  "exclude": [
+    "JARVIS/custom/vendor",
+    "JARVIS/OpenJarvis"
+  ],
+  "extraPaths": [
+    "JARVIS",
+    "MAYA INTELLIGENCE",
+    "WINDOWS APPLICATION/windows"
+  ],
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Windows",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingTypeStubs": false
+}

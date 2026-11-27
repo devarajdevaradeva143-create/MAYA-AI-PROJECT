@@ -7,7 +7,6 @@ import shutil
 import threading
 import zipfile
 from pathlib import Path
-from typing import Callable, Optional
 
 from custom.tools.path_guard import is_path_allowed
 
@@ -148,4 +147,3 @@ def watch_folder(directory: str, callback) -> str:
 
 __all__ = ["move_file", "copy_file", "rename_file", "zip_path", "unzip_path",
            "search_content", "watch_folder", "set_permission_gate"]
-PYEOF

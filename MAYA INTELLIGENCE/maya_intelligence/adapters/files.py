@@ -39,4 +39,3 @@ class FilesAdapter:
 
     def search_content(self, directory: str, query: str, ext: str = "") -> list:
         return self._fa.search_content(directory, query, ext)
-PYEOF

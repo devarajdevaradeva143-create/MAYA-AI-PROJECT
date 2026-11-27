@@ -11,7 +11,6 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
-import sys
 import threading
 from ctypes import wintypes
 from typing import Callable, Optional

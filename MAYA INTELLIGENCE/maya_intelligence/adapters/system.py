@@ -102,4 +102,3 @@ class SystemAdapter:
         res = self._proc.set_priority(target, priority)
         ok = not str(res).startswith("Cancelled")
         return {"success": ok, "result": res, "verified": ok}
-PYEOF

@@ -34,4 +34,3 @@ class BrowserAdapter:
     def browser_fill(self, selector: str, text: str) -> dict[str, Any]:
         res = self._bc.browser_fill(selector, text)
         return {"success": False, "result": res, "verified": False}
-PYEOF

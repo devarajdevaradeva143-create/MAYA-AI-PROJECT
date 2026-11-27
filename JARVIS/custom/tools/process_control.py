@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, Optional
 
 try:
     import psutil
@@ -108,4 +107,3 @@ def set_priority(name_or_pid, priority: str = "normal") -> str:
 
 
 __all__ = ["list_processes", "kill_process", "set_priority", "set_permission_gate", "HAS_PSUTIL"]
-PYEOF

@@ -8,10 +8,8 @@ Basic browser control without heavy deps:
 
 from __future__ import annotations
 
-import subprocess
 import threading
 import webbrowser
-from typing import Callable, Optional
 
 try:
     import httpx
@@ -111,4 +109,3 @@ def browser_screenshot(url: str, path: str = None) -> str:
 
 __all__ = ["open_url", "search_web", "fetch_page", "browser_click", "browser_fill",
            "browser_screenshot", "set_permission_gate", "HAS_PLAYWRIGHT", "HAS_HTTPX"]
-PYEOF

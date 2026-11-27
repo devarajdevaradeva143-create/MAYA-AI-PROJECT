@@ -985,11 +985,13 @@ class Orchestrator:
         if intent == "mouse_move":
             m = re.search(r"(\d+)\s*[,\s]+\s*(\d+)", text)
             if m:
-                params["x"] = int(m.group(1)); params["y"] = int(m.group(2))
+                params["x"] = int(m.group(1))
+                params["y"] = int(m.group(2))
         elif intent == "mouse_click":
             m = re.search(r"(\d+)\s*[,\s]+\s*(\d+)", text)
             if m:
-                params["x"] = int(m.group(1)); params["y"] = int(m.group(2))
+                params["x"] = int(m.group(1))
+                params["y"] = int(m.group(2))
             if re.search(r"right", text, re.I):
                 params["button"] = "right"
             elif re.search(r"middle", text, re.I):
@@ -1049,15 +1051,18 @@ class Orchestrator:
         elif intent == "move_file":
             m = re.search(r"move (?:file|folder)\s+(.+?)\s+(?:to)\s+(.+)", text, re.I)
             if m:
-                params["src"] = m.group(1).strip(); params["dst"] = m.group(2).strip()
+                params["src"] = m.group(1).strip()
+                params["dst"] = m.group(2).strip()
         elif intent == "copy_file":
             m = re.search(r"copy (?:file|folder)\s+(.+?)\s+(?:to)\s+(.+)", text, re.I)
             if m:
-                params["src"] = m.group(1).strip(); params["dst"] = m.group(2).strip()
+                params["src"] = m.group(1).strip()
+                params["dst"] = m.group(2).strip()
         elif intent == "rename_file":
             m = re.search(r"rename (?:file|folder)\s+(.+?)\s+(?:to|as)\s+(.+)", text, re.I)
             if m:
-                params["path"] = m.group(1).strip(); params["new_name"] = m.group(2).strip()
+                params["path"] = m.group(1).strip()
+                params["new_name"] = m.group(2).strip()
         elif intent == "zip_path":
             m = re.search(r"zip\s+(.+)", text, re.I)
             if m:
@@ -1522,7 +1527,6 @@ class Orchestrator:
                 lines.append("  -> no result")
                 break
             ok = bool(getattr(aq, "success", False))
-            verified = bool(getattr(aq, "verified", False))
             msg = getattr(aq, "message", "") or ""
             lines.append(f"  -> {'OK' if ok else 'FAIL'}: {msg}")
             results.append((intent, ok, msg))

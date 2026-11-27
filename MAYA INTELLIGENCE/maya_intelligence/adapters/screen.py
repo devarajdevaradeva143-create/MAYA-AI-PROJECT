@@ -50,4 +50,3 @@ class ScreenAdapter:
         res = self._sc.press_key(key)
         ok = not str(res).startswith("Cancelled")
         return {"success": ok, "result": res, "verified": ok}
-PYEOF

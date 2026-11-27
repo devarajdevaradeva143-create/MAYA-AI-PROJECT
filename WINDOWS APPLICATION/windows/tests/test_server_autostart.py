@@ -30,7 +30,7 @@ def page(qtbot, tmp_path: Path):
     path = tmp_path / "settings.yaml"
     path.write_text("ui:\n  theme: dark\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    widget = SettingsPage(repo)
+    widget = SettingsPage(repo, probe_engine=False)
     qtbot.addWidget(widget)
     widget.show()
     return widget

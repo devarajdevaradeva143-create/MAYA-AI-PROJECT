@@ -29,4 +29,3 @@ class OfficeAdapter:
         res = self._oc.word_add_text(path, text)
         ok = not str(res).startswith("Cancelled")
         return {"success": ok, "result": res, "verified": ok}
-PYEOF

@@ -104,6 +104,7 @@ class SettingsPage(QScrollArea):
         cloud: Any | None = None,
         engine: Any | None = None,
         model_service: ModelService | None = None,
+        probe_engine: bool = True,
     ) -> None:
         super().__init__()
         self._repository = repository
@@ -112,6 +113,7 @@ class SettingsPage(QScrollArea):
         self._server_factory = server_factory or shared_server_service
         self._engine = engine
         self._model_service = model_service
+        self._probe_engine = probe_engine
         self._engine_health_running = False
         self._server_start_worker: ServerStartWorker | None = None
         self._engine_health.connect(self._apply_engine_health)
@@ -382,8 +384,10 @@ class SettingsPage(QScrollArea):
         detail = f" · {model}" if model else ""
         self._engine_status.setText(f"Status: On · {host}{detail}")
 
-        # Check engine health and model availability in background
-        self._check_engine_health(model)
+        # Check engine health and model availability in background.
+        # Tests disable this: a daemon thread must never emit into a torn-down Qt widget.
+        if self._probe_engine:
+            self._check_engine_health(model)
 
     def _check_engine_health(self, model: str) -> None:
         """Probe the engine off the UI thread; the result arrives as a signal."""

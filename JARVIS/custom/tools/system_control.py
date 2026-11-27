@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from typing import Callable, Optional
 
 _GATE = None
 _GATE_LOCK = threading.RLock()
@@ -104,4 +103,3 @@ def cancel_shutdown() -> str:
 __all__ = ["get_volume", "set_volume", "mute_toggle", "get_brightness",
            "set_brightness", "lock_workstation", "sleep_pc", "shutdown_pc",
            "restart_pc", "cancel_shutdown", "set_permission_gate"]
-PYEOF

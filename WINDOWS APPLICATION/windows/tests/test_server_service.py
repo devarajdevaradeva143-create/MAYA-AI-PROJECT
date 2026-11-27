@@ -17,6 +17,9 @@ from app.services.server_service import ServerService, server_settings
 from app.services.wake_service import WakeAdapter
 from tests.fakes import DEVICE_ID, FakeEngine, auth, make_harness
 
+# The real bootstrap test needs uvicorn; skip cleanly under a partial interpreter.
+pytest.importorskip("uvicorn", reason="uvicorn required for server bootstrap tests")
+
 # -- settings ---------------------------------------------------------
 
 

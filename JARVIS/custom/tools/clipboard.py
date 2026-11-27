@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from typing import Callable, Optional
 
 _GATE = None
 _GATE_LOCK = threading.RLock()
@@ -52,4 +51,3 @@ def write_clipboard(text: str) -> str:
 
 
 __all__ = ["read_clipboard", "write_clipboard", "set_permission_gate"]
-PYEOF

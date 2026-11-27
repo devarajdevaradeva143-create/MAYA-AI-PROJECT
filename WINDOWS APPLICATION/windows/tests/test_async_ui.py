@@ -198,7 +198,7 @@ def settings_page(qtbot, tmp_path: Path, fake_server: _FakeServer):
     path = tmp_path / "settings.yaml"
     path.write_text("ui:\n  theme: dark\n", encoding="utf-8")
     repo = SettingsRepository(path, tmp_path / "backups")
-    page = SettingsPage(repo, server_factory=lambda: fake_server)
+    page = SettingsPage(repo, server_factory=lambda: fake_server, probe_engine=False)
     qtbot.addWidget(page)
     page.show()
     yield page
