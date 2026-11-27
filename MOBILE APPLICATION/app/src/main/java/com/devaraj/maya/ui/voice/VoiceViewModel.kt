@@ -8,6 +8,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -24,11 +25,13 @@ import com.devaraj.maya.data.remote.ConnectionState
 import com.devaraj.maya.data.repo.ChatRepository
 import com.devaraj.maya.domain.model.AiSource
 import com.devaraj.maya.domain.model.MessageRole
+import com.devaraj.maya.service.WakeForegroundService
 import com.devaraj.maya.voice.GeminiVoicePlayer
 import com.devaraj.maya.voice.PiperTts
 import com.devaraj.maya.voice.SpeechText
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +56,8 @@ data class VoiceUiState(
     val recent: List<String> = emptyList(),
     val errorResId: Int? = null,
     val recognizerAvailable: Boolean = true,
+    /** "auto", "en" or "ta". */
+    val sttLanguage: String = "auto",
 )
 
 class VoiceViewModel(
@@ -74,10 +79,20 @@ class VoiceViewModel(
     private var speechRecognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var ttsInitFailed = false
     private var activeConversationId: String? = null
     private var pendingSpeak: String? = null
     private var currentTtsEngine: String = "system"
     private var currentTtsSpeed: Float = 1.0f
+    private var currentGeminiKey: String = ""
+    private var currentSttLanguage: String = "auto"
+    private var resumeWakeMicAfterListening = false
+    private var listenGeneration = 0
+    private var rmsLogTick = 0
+
+    private fun log(message: String) {
+        Log.d("MayaVoice", message)
+    }
 
     init {
         _state.update { it.copy(recognizerAvailable = SpeechRecognizer.isRecognitionAvailable(app)) }
@@ -86,6 +101,9 @@ class VoiceViewModel(
             settingsStore.settings.collect { s ->
                 currentTtsEngine = s.ttsEngine
                 currentTtsSpeed = s.ttsSpeed
+                currentGeminiKey = s.geminiApiKey
+                currentSttLanguage = s.sttLanguage
+                _state.update { it.copy(sttLanguage = s.sttLanguage) }
             }
         }
         viewModelScope.launch {
@@ -97,9 +115,22 @@ class VoiceViewModel(
     private fun initTts() {
         tts = TextToSpeech(app) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
-            if (ttsReady) {
-                val lang = if (currentTtsEngine == "piper") Locale.forLanguageTag("ta-IN") else Locale.getDefault()
-                tts?.language = lang
+            ttsInitFailed = !ttsReady
+            if (!ttsReady) {
+                // Never leave the orb stuck on "Speaking..." when the engine
+                // could not start (disabled engine, missing voice data, ...).
+                pendingSpeak = null
+                _state.update { s ->
+                    if (s.phase == VoicePhase.Speaking) {
+                        s.copy(
+                            phase = VoicePhase.Idle,
+                            errorResId = com.devaraj.maya.R.string.voice_error_tts_unavailable,
+                        )
+                    } else {
+                        s
+                    }
+                }
+            } else {
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) {
@@ -139,31 +170,105 @@ class VoiceViewModel(
             }
             return
         }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        val intent = buildSttIntent()
+
+        // The background wake listener keeps the mic open. Pause it so the
+        // recognizer hears the user instead of silence.
+        val wakeWasRunning = WakeForegroundService.isRunning
+        if (wakeWasRunning) {
+            resumeWakeMicAfterListening = true
+            WakeForegroundService.pauseMic()
         }
-        try {
-            speechRecognizer?.destroy()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(app).apply {
-                setRecognitionListener(listener)
-                startListening(intent)
-            }
-            _state.update {
-                it.copy(phase = VoicePhase.Listening, transcript = "", reply = "", errorResId = null)
-            }
-        } catch (_: Exception) {
-            _state.update {
-                it.copy(phase = VoicePhase.Error, errorResId = com.devaraj.maya.R.string.voice_error_stt_unavailable)
+
+        val generation = ++listenGeneration
+        log("start mode=$currentSttLanguage lang=${intent.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE)} wake=$wakeWasRunning")
+        _state.update {
+            it.copy(phase = VoicePhase.Listening, transcript = "", reply = "", errorResId = null)
+        }
+        viewModelScope.launch {
+            if (wakeWasRunning) delay(300) // let AudioRecord release the mic
+            if (generation != listenGeneration) return@launch
+            try {
+                speechRecognizer?.destroy()
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(app).apply {
+                    setRecognitionListener(listener)
+                    startListening(intent)
+                }
+            } catch (e: Exception) {
+                log("recognizer create failed: ${e.message}")
+                resumeWakeMic()
+                _state.update {
+                    it.copy(
+                        phase = VoicePhase.Error,
+                        errorResId = com.devaraj.maya.R.string.voice_error_stt_unavailable,
+                    )
+                }
             }
         }
     }
 
+    /** Give the mic back to the wake listener after the voice session. */
+    private fun resumeWakeMic() {
+        if (!resumeWakeMicAfterListening) return
+        resumeWakeMicAfterListening = false
+        WakeForegroundService.resumeMic()
+    }
+
+    fun setSttLanguage(mode: String) {
+        if (mode != "auto" && mode != "en" && mode != "ta") return
+        currentSttLanguage = mode
+        _state.update { it.copy(sttLanguage = mode) }
+        viewModelScope.launch { settingsStore.setSttLanguage(mode) }
+    }
+
+    /**
+     * Build the recognizer request for the selected language.
+     *
+     * Auto keeps the phone language as the base and asks the recognizer to
+     * detect/switch to Tamil or Indian English. Tamil mode pins `ta-IN`
+     * directly, which is the reliable path when the phone locale is English.
+     */
+    private fun buildSttIntent(): Intent {
+        val deviceTag = Locale.getDefault().toLanguageTag()
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            // Tamil usually needs the online model on phones that only have
+            // the device language installed on-device.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+        }
+        when (currentSttLanguage) {
+            "ta" -> intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ta-IN")
+            "en" -> intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, deviceTag)
+            else -> {
+                val allowed = arrayListOf(deviceTag, "ta-IN", "en-IN")
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, deviceTag)
+                intent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true)
+                intent.putExtra(
+                    RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH,
+                    RecognizerIntent.LANGUAGE_SWITCH_BALANCED,
+                )
+                intent.putStringArrayListExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES,
+                    ArrayList(allowed),
+                )
+                intent.putStringArrayListExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES,
+                    ArrayList(allowed),
+                )
+            }
+        }
+        return intent
+    }
+
     fun stop() {
+        listenGeneration++
         try { speechRecognizer?.stopListening() } catch (_: Exception) {}
         try { speechRecognizer?.cancel() } catch (_: Exception) {}
+        resumeWakeMic()
         stopSpeakingInternal()
         _state.update { s ->
             if (s.phase == VoicePhase.Speaking || s.phase == VoicePhase.Listening || s.phase == VoicePhase.Thinking) {
@@ -185,32 +290,65 @@ class VoiceViewModel(
 
     private val listener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            log("ready")
             _state.update { it.copy(phase = VoicePhase.Listening, errorResId = null) }
         }
 
-        override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBeginningOfSpeech() {
+            log("speech start")
+        }
+
+        override fun onRmsChanged(rmsdB: Float) {
+            if (rmsLogTick++ % 25 == 0) log("rms=$rmsdB")
+        }
+
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
+            log("speech end")
             _state.update { it.copy(phase = VoicePhase.Transcribing) }
         }
 
         override fun onError(error: Int) {
+            log("error=$error")
+            listenGeneration++
+            resumeWakeMic()
             val res = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH,
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> com.devaraj.maya.R.string.voice_error_no_match
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> com.devaraj.maya.R.string.voice_mic_permission_body
+                SpeechRecognizer.ERROR_AUDIO -> com.devaraj.maya.R.string.voice_error_audio
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> com.devaraj.maya.R.string.voice_error_mic_busy
+                SpeechRecognizer.ERROR_NETWORK,
+                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> com.devaraj.maya.R.string.voice_error_network
+                SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
+                SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> if (currentSttLanguage == "ta") {
+                    com.devaraj.maya.R.string.voice_error_tamil_unavailable
+                } else {
+                    com.devaraj.maya.R.string.voice_error_language
+                }
                 else -> com.devaraj.maya.R.string.voice_error_generic
             }
             _state.update { it.copy(phase = VoicePhase.Error, errorResId = res) }
         }
 
+        override fun onLanguageDetection(results: Bundle) {
+            val language = results.getString(SpeechRecognizer.DETECTED_LANGUAGE)
+            val confidence = results.getInt(
+                SpeechRecognizer.LANGUAGE_DETECTION_CONFIDENCE_LEVEL,
+                SpeechRecognizer.LANGUAGE_DETECTION_CONFIDENCE_LEVEL_UNKNOWN,
+            )
+            log("language detected=$language confidence=$confidence")
+        }
+
         override fun onResults(results: Bundle?) {
+            listenGeneration++
+            resumeWakeMic()
             val text = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
                 ?.trim()
                 .orEmpty()
+            log("results=${text.take(100)}")
             if (text.isBlank()) {
                 _state.update {
                     it.copy(phase = VoicePhase.Error, errorResId = com.devaraj.maya.R.string.voice_error_no_match)
@@ -227,6 +365,7 @@ class VoiceViewModel(
                 ?.trim()
                 .orEmpty()
             if (text.isNotBlank()) {
+                log("partial=${text.take(100)}")
                 _state.update { it.copy(transcript = text) }
             }
         }
@@ -262,8 +401,12 @@ class VoiceViewModel(
                     }
                 }
 
+                val connection = connectionRepository.state.value
+                val modelReady = onDeviceModel?.status?.value?.valid == true
+                val geminiReady = geminiRepository != null && currentGeminiKey.isNotBlank()
+                log("send connected=${connection is ConnectionState.Connected} model=$modelReady gemini=$geminiReady")
+
                 val reply = withContext(Dispatchers.IO) {
-                    val connection = connectionRepository.state.value
                     when {
                         connection is ConnectionState.Connected -> {
                             val response = apiClient.api(connection.device.host, connection.device.port).chat(
@@ -281,19 +424,20 @@ class VoiceViewModel(
                             )
                             response.reply.trim() to AiSource.LAPTOP
                         }
-                        onDeviceModel != null && onDeviceModel.statusText().contains("valid", ignoreCase = true) -> {
+                        modelReady -> {
                             val prompt = buildVoicePrompt(history)
-                            val result = onDeviceModel.generate(prompt, 1024)
-                            result.getOrDefault("")?.let { reply ->
+                            val result = onDeviceModel!!.generate(prompt, 1024)
+                            val reply = result.getOrDefault("").trim()
+                            if (reply.isNotBlank()) {
                                 chatRepository.addMayaMessage(
                                     conversationId = conversationId,
                                     text = reply,
                                     source = AiSource.PHONE,
                                 )
-                                reply to AiSource.PHONE
-                            } ?: ("" to AiSource.NONE)
+                            }
+                            reply to AiSource.PHONE
                         }
-                        geminiRepository != null -> {
+                        geminiReady -> {
                             val messages = history.mapNotNull { msg ->
                                 when (msg.role) {
                                     "user" -> GeminiRepository.GeminiMessage("user", msg.content)
@@ -304,7 +448,7 @@ class VoiceViewModel(
                                 }
                             }
                             if (messages.isEmpty()) "" to AiSource.NONE else {
-                                val reply = geminiRepository.chat(
+                                val reply = geminiRepository!!.chat(
                                     messages = messages,
                                     systemPrompt = PersonaPrompts.forVoice(),
                                     maxTokens = 1024,
@@ -315,7 +459,7 @@ class VoiceViewModel(
                                     model = reply.model,
                                     source = AiSource.CLOUD,
                                 )
-                                reply.text to AiSource.CLOUD
+                                reply.text.trim() to AiSource.CLOUD
                             }
                         }
                         else -> "" to AiSource.NONE
@@ -323,11 +467,24 @@ class VoiceViewModel(
                 }
 
                 val (replyText, replySource) = reply
-                if (replyText.isNotBlank()) {
-                    _state.update { it.copy(reply = replyText) }
-                    speak(replyText, replySource)
+                log("reply source=$replySource len=${replyText.length}")
+                if (replyText.isBlank()) {
+                    _state.update {
+                        it.copy(
+                            phase = VoicePhase.Error,
+                            errorResId = if (!geminiReady && connection !is ConnectionState.Connected && !modelReady) {
+                                com.devaraj.maya.R.string.voice_error_no_connection
+                            } else {
+                                com.devaraj.maya.R.string.voice_error_generic
+                            },
+                        )
+                    }
+                    return@launch
                 }
-            } catch (_: Exception) {
+                _state.update { it.copy(reply = replyText) }
+                speak(replyText, replySource)
+            } catch (e: Exception) {
+                log("send failed: ${e.message}")
                 _state.update {
                     it.copy(phase = VoicePhase.Error, errorResId = com.devaraj.maya.R.string.voice_error_generic)
                 }
@@ -348,6 +505,7 @@ class VoiceViewModel(
 
     private fun speak(text: String, source: AiSource = AiSource.NONE) {
         val clean = SpeechText.strip(text)
+        log("speak source=$source len=${clean.length}")
         if (clean.isBlank()) {
             _state.update { it.copy(phase = VoicePhase.Idle) }
             return
@@ -401,14 +559,76 @@ class VoiceViewModel(
         }
     }
 
+    /**
+     * Pick a TTS language that matches the reply. Tamil script needs `ta-IN`;
+     * everything else uses the phone's current locale. If the engine lacks the
+     * requested language we fall back to the default locale instead of
+     * silently producing no audio.
+     */
+    private fun applyTtsLanguage(text: String): Boolean {
+        val engine = tts ?: return false
+        val desired = if (text.any { it.code in 0x0B80..0x0BFF }) {
+            Locale.forLanguageTag("ta-IN")
+        } else {
+            Locale.getDefault()
+        }
+        val result = try {
+            engine.setLanguage(desired)
+        } catch (_: Exception) {
+            TextToSpeech.LANG_NOT_SUPPORTED
+        }
+        if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
+            return true
+        }
+        val fallback = try {
+            engine.setLanguage(Locale.getDefault())
+        } catch (_: Exception) {
+            TextToSpeech.LANG_NOT_SUPPORTED
+        }
+        return fallback != TextToSpeech.LANG_MISSING_DATA && fallback != TextToSpeech.LANG_NOT_SUPPORTED
+    }
+
     private fun speakSystem(text: String) {
-        if (!ttsReady) {
+        val engine = tts
+        if (!ttsReady || engine == null) {
+            if (ttsInitFailed || engine == null) {
+                pendingSpeak = null
+                _state.update {
+                    it.copy(
+                        phase = VoicePhase.Idle,
+                        errorResId = com.devaraj.maya.R.string.voice_error_tts_unavailable,
+                    )
+                }
+                return
+            }
+            // TTS is still initialising; queue the first reply.
             pendingSpeak = text
             _state.update { it.copy(phase = VoicePhase.Speaking) }
             return
         }
+        if (!applyTtsLanguage(text)) {
+            _state.update {
+                it.copy(
+                    phase = VoicePhase.Idle,
+                    errorResId = com.devaraj.maya.R.string.voice_error_tts_unavailable,
+                )
+            }
+            return
+        }
         _state.update { it.copy(phase = VoicePhase.Speaking, errorResId = null) }
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "maya-voice-reply")
+        val result = try {
+            engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "maya-voice-reply")
+        } catch (_: Exception) {
+            TextToSpeech.ERROR
+        }
+        if (result == TextToSpeech.ERROR) {
+            _state.update {
+                it.copy(
+                    phase = VoicePhase.Idle,
+                    errorResId = com.devaraj.maya.R.string.voice_error_tts_unavailable,
+                )
+            }
+        }
     }
 
     fun clearError() {
@@ -416,6 +636,7 @@ class VoiceViewModel(
     }
 
     override fun onCleared() {
+        resumeWakeMic()
         try { speechRecognizer?.destroy() } catch (_: Exception) {}
         try { tts?.stop() } catch (_: Exception) {}
         try { tts?.shutdown() } catch (_: Exception) {}

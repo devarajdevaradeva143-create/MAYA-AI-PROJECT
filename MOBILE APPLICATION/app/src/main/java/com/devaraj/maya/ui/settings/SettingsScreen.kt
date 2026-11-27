@@ -78,6 +78,8 @@ fun SettingsScreen(
     onDeleteVosk: () -> Unit = {},
     geminiApiKey: String = "",
     onGeminiKeyChange: (String) -> Unit = {},
+    sttLanguage: String = "auto",
+    onSttLanguageChange: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
@@ -290,6 +292,30 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 2.dp),
             )
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))
+
+        Text(text = "Voice language", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Choose the language you speak to Maya. Auto detects Tamil, English and Thanglish. " +
+                "தமிழ் pins Tamil speech recognition.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+            listOf(
+                "auto" to R.string.voice_language_auto,
+                "en" to R.string.voice_language_english,
+                "ta" to R.string.voice_language_tamil,
+            ).forEach { (mode, label) ->
+                FilterChip(
+                    selected = sttLanguage == mode,
+                    onClick = { onSttLanguageChange(mode) },
+                    label = { Text(stringResource(label)) },
+                )
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))

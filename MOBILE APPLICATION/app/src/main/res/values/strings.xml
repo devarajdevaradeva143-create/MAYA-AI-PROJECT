@@ -105,6 +105,9 @@
 
     <!-- Voice -->
     <string name="voice_title">Voice</string>
+    <string name="voice_language_auto">Auto</string>
+    <string name="voice_language_english">English</string>
+    <string name="voice_language_tamil">தமிழ்</string>
     <string name="voice_hint_idle">Tap the mic and speak to Maya.</string>
     <string name="voice_listening">Listening…</string>
     <string name="voice_transcribing">Heard you…</string>
@@ -122,6 +125,12 @@
     <string name="voice_error_no_connection">Connect to your laptop to chat by voice.</string>
     <string name="voice_error_stt_unavailable">Speech recognition is not available on this device.</string>
     <string name="voice_error_no_match">I did not catch that. Try again.</string>
+    <string name="voice_error_audio">Could not access the microphone. Check the mic and try again.</string>
+    <string name="voice_error_mic_busy">The microphone is busy. Close other apps using it and try again.</string>
+    <string name="voice_error_network">Speech recognition needs a network connection. Check your internet and try again.</string>
+    <string name="voice_error_language">Speech recognition does not support this language on this device.</string>
+    <string name="voice_error_tamil_unavailable">Tamil speech is not available yet. In Google app settings, download Tamil voice input, or switch the voice language to English.</string>
+    <string name="voice_error_tts_unavailable">Voice output is not available on this device.</string>
     <string name="voice_error_generic">Something went wrong. Try again.</string>
 
     <!-- Phone control (Phase 6) -->

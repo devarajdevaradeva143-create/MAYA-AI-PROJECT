@@ -386,6 +386,10 @@ class SettingsViewModel(
         settingsStore.setTtsSpeed(speed)
     }
 
+    fun setSttLanguage(mode: String) {
+        viewModelScope.launch { settingsStore.setSttLanguage(mode) }
+    }
+
     class Factory(
         private val app: Application,
         private val settingsStore: SettingsStore,

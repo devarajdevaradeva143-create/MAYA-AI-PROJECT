@@ -15,8 +15,19 @@
 
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
-    <!-- Phone control (Phase 6) - requested only when the user uses the feature. -->
+    <!--
+        Android 11+ package visibility.
+        SpeechRecognizer and TextToSpeech cannot see the system services without
+        these two intents, which makes voice silently report "not available".
+    -->
     <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- Phone control (Phase 6) - requested only when the user uses the feature. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

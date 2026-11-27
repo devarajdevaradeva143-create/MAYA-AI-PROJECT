@@ -23,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -51,6 +52,22 @@ class WakeForegroundService : Service() {
         @Volatile
         var isRunning: Boolean = false
             private set
+
+        /**
+         * While the in-app voice recognizer is listening, release the mic so
+         * Android does not feed it silence. The service keeps its notification
+         * and resumes recording when [resumeMic] is called.
+         */
+        @Volatile
+        private var micPaused = false
+
+        fun pauseMic() {
+            micPaused = true
+        }
+
+        fun resumeMic() {
+            micPaused = false
+        }
 
         private fun setRunning(value: Boolean) {
             isRunning = value
@@ -186,6 +203,18 @@ class WakeForegroundService : Service() {
 
         try {
             while (running) {
+                if (micPaused) {
+                    // Hand the microphone to the in-app recognizer.
+                    try { record.stop() } catch (_: Exception) {}
+                    while (running && micPaused) delay(100)
+                    if (!running) break
+                    try {
+                        record.startRecording()
+                    } catch (_: Exception) {
+                        break
+                    }
+                    continue
+                }
                 val read = record.read(buffer, 0, buffer.size)
                 if (read <= 0) continue
                 var peak = 0
@@ -263,6 +292,7 @@ class WakeForegroundService : Service() {
 
     override fun onDestroy() {
         running = false
+        micPaused = false
         setRunning(false)
         scope.cancel()
         try { audioRecord?.stop() } catch (_: Exception) {}

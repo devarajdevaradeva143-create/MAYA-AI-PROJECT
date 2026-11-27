@@ -50,6 +50,8 @@ data class MayaSettings(
     val geminiApiKey: String = "",
     val ttsEngine: String = "system",
     val ttsSpeed: Float = 1.0f,
+    /** Speech input language: "auto", "en" or "ta". */
+    val sttLanguage: String = "auto",
 ) {
     companion object {
         const val DEFAULT_PORT = 8420
@@ -85,6 +87,7 @@ class SettingsStore(private val context: Context) {
         val GEMINI_API_KEY_LEGACY = stringPreferencesKey("gemini_api_key")
         val TTS_ENGINE = stringPreferencesKey("tts_engine")
         val TTS_SPEED = floatPreferencesKey("tts_speed")
+        val STT_LANGUAGE = stringPreferencesKey("stt_language")
     }
 
     val settings: Flow<MayaSettings> = context.mayaDataStore.data
@@ -107,6 +110,7 @@ class SettingsStore(private val context: Context) {
                 geminiApiKey = secretStore.decrypt(prefs[Keys.GEMINI_API_KEY_ENC] ?: ""),
                 ttsEngine = prefs[Keys.TTS_ENGINE] ?: "system",
                 ttsSpeed = prefs[Keys.TTS_SPEED] ?: 1.0f,
+                sttLanguage = prefs[Keys.STT_LANGUAGE] ?: "auto",
             )
         }
         // Keystore decryption is IO; keep it off the main thread.
@@ -205,6 +209,12 @@ class SettingsStore(private val context: Context) {
     suspend fun setTtsSpeed(speed: Float) {
         context.mayaDataStore.edit { prefs ->
             prefs[Keys.TTS_SPEED] = speed
+        }
+    }
+
+    suspend fun setSttLanguage(mode: String) {
+        context.mayaDataStore.edit { prefs ->
+            prefs[Keys.STT_LANGUAGE] = mode
         }
     }
 

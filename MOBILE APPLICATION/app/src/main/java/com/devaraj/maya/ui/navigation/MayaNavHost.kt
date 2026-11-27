@@ -313,6 +313,8 @@ fun MayaNavHost(
                         settingsVm.setGeminiApiKey(key)
                     }
                 },
+                sttLanguage = appSettings.sttLanguage,
+                onSttLanguageChange = settingsVm::setSttLanguage,
             )
         }
     }
