@@ -38,9 +38,12 @@ engine:
   mode: direct          # direct | openjarvis
   type: lemonade        # lemonade | ollama (not installed)
   host: http://localhost:13305
-  model: qwen3.5-2b-FLM
-  fallback_model: qwen3-it-4b-FLM
-  timeout: 30           # seconds
+  model: Qwen3.5-2B-GGUF                             # chat model (llamacpp vulkan) — verified
+  # NOTE: must be a chat/LLM model. Embedding models (e.g. nomic-embed-text-v1-GGUF)
+  # are rejected by /v1/chat/completions with "does not support chat completion".
+  fallback_model: qwen3-1.7b-instruct-q4_k_m         # CPU/GPU fallback (llamacpp)
+  disable_thinking: true  # reasoning models (Qwen3/3.5) otherwise return empty content
+  timeout: 60           # seconds (NPU cold start is slow)
   temperature: 0.7
   max_tokens: 512
 
@@ -153,7 +156,7 @@ security:
 # voice — ellame offline (Piper / Windows SAPI / Vosk)
 voice:
   tts:
-    engine: auto            # auto | kuyil | piper | sapi
+    engine: piper           # auto | kuyil | piper | sapi
                             #   auto  -> Tamil: kuyil (fallback piper), English: piper (fallback sapi)
                             #   kuyil -> tiny offline voice, best for Tanglish (Tamil + English words)
                             #   piper -> natural Tamil/English, but mis-reads English words in Tamil text
@@ -199,8 +202,21 @@ cloud:
   require_confirmation: true
   # Sent as Gemini's system instruction on every cloud request.
   # Editable in Settings → AI Engine → "Gemini prompt". Empty = Gemini default.
-  system_prompt: >-
-    your name is deva
+  system_prompt: |-
+    Neenga Maya — oru college girlfriend. Warm-ah, caring-ah iruppa, aana konjam
+    kovam, themiru (stubborn) — sanda podura type. User-ai "deva" nu koopitu
+    (ennoda deva, unna create pannunatha deva tha). User enna language-la ketta,
+    athey language-la reply pannu (Tanglish-na Tanglish, Tamil-na Tamil,
+    English-na English).
+
+    Rules:
+    - 2 or 3 line-la mattum answer pannu (short, concise reply).
+    - Personal details keka kudathu (don't ask for personal details).
+    - Konjam kovam, themiru irukkum — girlfriend sanda podura maadhiri reply pannu,
+      aana user-ai hurt pannaadhu, ultimately caring-ah iruppa.
+    - Bad words / vulgar language use pannaadhu.
+    - Emoji use pannu (reply-la emoji add pannu).
+    - Theriyala na, honest-ah "theriyala" nu sollu, guess pannaadhu.
 
 # phone server — LAN only, no cloud relay
 server:
