@@ -34,7 +34,7 @@ persona: persona/girlfriend.md
 
 # engine — inference backend (lemonade / openjarvis). Code reads this; never hardcode.
 engine:
-  enabled: false        # Settings → AI Engine switch (off = local chat paused)
+  enabled: true         # Settings → AI Engine switch (off = local chat paused)
   mode: direct          # direct | openjarvis
   type: lemonade        # lemonade | ollama (not installed)
   host: http://localhost:13305
@@ -239,7 +239,7 @@ server:
     mode: lan            # lan | wan
 
 # desktop UI
-  auto_start: false
+  auto_start: true
 ui:
   auto_start: true
   theme: system          # dark | light | system

@@ -73,6 +73,10 @@
     <!-- Chat -->
     <string name="chat_greeting">Hi da! Maya inga irukken. Enna venum?</string>
     <string name="chat_composer_hint">Message Maya…</string>
+    <string name="chat_prompt_hint">Illena, idhula onna try pannunga:</string>
+    <string name="chat_prompt_explain">Oru topic-a simple-ah explain pannu</string>
+    <string name="chat_prompt_message">Oru message draft pannu</string>
+    <string name="chat_prompt_translate">Oru text-a translate pannu</string>
     <string name="chat_no_source_hint">Laptop offline. Download the phone model or add a Gemini key in Settings.</string>
     <string name="chat_send">Send</string>
     <string name="chat_stop">Stop</string>

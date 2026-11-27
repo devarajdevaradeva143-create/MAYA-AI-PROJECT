@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,6 +80,7 @@ fun ChatScreen(
     var input by rememberSaveable { mutableStateOf("") }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length) {
         if (state.messages.isNotEmpty()) {
@@ -155,16 +157,46 @@ fun ChatScreen(
         ) {
             if (state.messages.isEmpty()) {
                 item {
-                    Box(
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 48.dp, horizontal = 24.dp),
-                        contentAlignment = Alignment.Center,
+                            .padding(vertical = 40.dp, horizontal = 24.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.chat_greeting),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(R.string.chat_prompt_hint),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                        )
+                        AssistChip(
+                            onClick = {
+                                input = context.getString(R.string.chat_prompt_explain)
+                            },
+                            label = {
+                                Text(text = stringResource(R.string.chat_prompt_explain))
+                            },
+                        )
+                        AssistChip(
+                            onClick = {
+                                input = context.getString(R.string.chat_prompt_message)
+                            },
+                            label = {
+                                Text(text = stringResource(R.string.chat_prompt_message))
+                            },
+                        )
+                        AssistChip(
+                            onClick = {
+                                input = context.getString(R.string.chat_prompt_translate)
+                            },
+                            label = {
+                                Text(text = stringResource(R.string.chat_prompt_translate))
+                            },
                         )
                     }
                 }
