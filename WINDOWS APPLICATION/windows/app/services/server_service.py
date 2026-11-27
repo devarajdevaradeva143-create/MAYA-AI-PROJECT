@@ -317,6 +317,7 @@ class ServerService:
             log_config=None,
             access_log=False,
             lifespan="off",
+            ws="wsproto",
         )
         server = uvicorn.Server(config)
         self._server = server

@@ -33,12 +33,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -47,6 +50,7 @@ import com.devaraj.maya.MayaApp
 import com.devaraj.maya.R
 import com.devaraj.maya.data.discovery.DiscoveredLaptop
 import com.devaraj.maya.data.discovery.LaptopDiscovery
+import com.devaraj.maya.p2p.P2pState
 import com.devaraj.maya.ui.connection.reasonText
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -65,6 +69,7 @@ fun PairingScreen(
             deviceIdentity = app.container.deviceIdentity,
             discovery = LaptopDiscovery(app),
             settingsStore = app.container.settingsStore,
+            context = app.applicationContext,
         )
     }
     val viewModel: PairingViewModel = viewModel(factory = factory)
@@ -119,6 +124,13 @@ fun PairingScreen(
                     onPortChange = viewModel::onPortChange,
                     onSelect = viewModel::selectLaptop,
                     onContinue = viewModel::continueWithManualHost,
+                    onCreateP2pOffer = viewModel::createP2pOffer,
+                    onPasteP2pOffer = viewModel::acceptP2pOffer,
+                    onPasteP2pAnswer = viewModel::acceptP2pAnswer,
+                    onCloseP2p = viewModel::closeP2p,
+                    onP2pTurnHostChange = viewModel::onP2pTurnHostChange,
+                    onP2pTurnUsernameChange = viewModel::onP2pTurnUsernameChange,
+                    onP2pTurnCredentialChange = viewModel::onP2pTurnCredentialChange,
                     onScan = {
                         scanLauncher.launch(
                             ScanOptions().apply {
@@ -172,6 +184,13 @@ private fun FindLaptopSection(
     onPortChange: (String) -> Unit,
     onSelect: (DiscoveredLaptop) -> Unit,
     onContinue: () -> Unit,
+    onCreateP2pOffer: () -> Unit,
+    onPasteP2pOffer: (String) -> Unit,
+    onPasteP2pAnswer: (String) -> Unit,
+    onCloseP2p: () -> Unit,
+    onP2pTurnHostChange: (String) -> Unit,
+    onP2pTurnUsernameChange: (String) -> Unit,
+    onP2pTurnCredentialChange: (String) -> Unit,
     onScan: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -269,8 +288,7 @@ private fun FindLaptopSection(
             onClick = onScan,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp)
-                .padding(bottom = 8.dp),
+                .padding(top = 8.dp),
         ) {
             Icon(
                 imageVector = Icons.Outlined.QrCodeScanner,
@@ -279,6 +297,164 @@ private fun FindLaptopSection(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(text = stringResource(R.string.pairing_scan_qr))
+        }
+
+        P2pSection(
+            state = state,
+            onCreateOffer = onCreateP2pOffer,
+            onPasteOffer = onPasteP2pOffer,
+            onPasteAnswer = onPasteP2pAnswer,
+            onDisconnect = onCloseP2p,
+            onTurnHostChange = onP2pTurnHostChange,
+            onTurnUsernameChange = onP2pTurnUsernameChange,
+            onTurnCredentialChange = onP2pTurnCredentialChange,
+        )
+    }
+}
+
+@Suppress("DEPRECATION") // LocalClipboardManager.getText remains the simplest synchronous paste path.
+@Composable
+private fun P2pSection(
+    state: PairingUiState,
+    onCreateOffer: () -> Unit,
+    onPasteOffer: (String) -> Unit,
+    onPasteAnswer: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    onTurnHostChange: (String) -> Unit,
+    onTurnUsernameChange: (String) -> Unit,
+    onTurnCredentialChange: (String) -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val pastedText: () -> String = {
+        clipboard.getText()?.text?.toString()?.trim().orEmpty()
+    }
+    val relayExpanded = remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        Text(
+            text = "Internet P2P (direct)",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "STUN only unless you configure TURN. Paste the offer or answer from the other device.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Text(text = "State: ${state.p2pState.name}", style = MaterialTheme.typography.labelLarge)
+            if (state.p2pTurnConfigured) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = MaterialTheme.shapes.extraSmall,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        text = "TURN relay",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Button(onClick = onCreateOffer, modifier = Modifier.weight(1f)) {
+                Text(text = "Create offer")
+            }
+            OutlinedButton(
+                onClick = { onPasteOffer(pastedText()) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(text = "Paste offer")
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 4.dp),
+        ) {
+            OutlinedButton(
+                onClick = { onPasteAnswer(pastedText()) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(text = "Paste answer")
+            }
+            OutlinedButton(
+                onClick = onDisconnect,
+                enabled = state.p2pState != P2pState.NEW,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(text = "Disconnect")
+            }
+        }
+
+        OutlinedTextField(
+            value = state.p2pPayload,
+            onValueChange = {},
+            label = { Text(text = "Offer / answer / payload") },
+            readOnly = true,
+            minLines = 2,
+            maxLines = 4,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+
+        state.p2pError?.let { message ->
+            ErrorCard(message = "P2P error", detail = message)
+        }
+
+        TextButton(onClick = { relayExpanded.value = !relayExpanded.value }) {
+            Text(
+                text = if (state.p2pTurnConfigured) {
+                    "TURN relay: configured"
+                } else {
+                    "TURN relay: off (optional)"
+                },
+            )
+        }
+        if (relayExpanded.value) {
+            OutlinedTextField(
+                value = state.p2pTurnHost,
+                onValueChange = onTurnHostChange,
+                label = { Text(text = "TURN host") },
+                placeholder = { Text(text = "turn.example.com:3478") },
+                singleLine = true,
+                enabled = state.p2pTurnEditable,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.p2pTurnUsername,
+                onValueChange = onTurnUsernameChange,
+                label = { Text(text = "TURN username") },
+                singleLine = true,
+                enabled = state.p2pTurnEditable,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+            OutlinedTextField(
+                value = state.p2pTurnCredential,
+                onValueChange = onTurnCredentialChange,
+                label = { Text(text = "TURN credential") },
+                singleLine = true,
+                enabled = state.p2pTurnEditable,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+            if (!state.p2pTurnEditable) {
+                Text(
+                    text = "Disconnect to change relay settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
 }

@@ -41,7 +41,7 @@ class PhoneRemotePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self._repository = repository or SettingsRepository()
-        self._client: get_phone_remote_client | None = None
+        self._client = None
         self._confirm_token: str | None = None
         self._confirm_timer: QTimer | None = None
         self._phone_host: str | None = None
@@ -262,11 +262,11 @@ class PhoneRemotePage(QWidget):
 
         def _worker():
             try:
-                client = get_phone_remote_client(
+                self._client = get_phone_remote_client(
                     on_frame=self._on_frame_received,
                     on_error=self._on_client_error,
                 )
-                result = client.start_session(self._phone_host)
+                result = self._client.start_session(self._phone_host)
                 if result.get("status") == "needs_confirmation":
                     self._confirm_token = result["confirm_token"]
                     self._show_confirm_dialog()
@@ -309,11 +309,11 @@ class PhoneRemotePage(QWidget):
 
         def _worker():
             try:
-                client = get_phone_remote_client(
+                self._client = self._client or get_phone_remote_client(
                     on_frame=self._on_frame_received,
                     on_error=self._on_client_error,
                 )
-                client.confirm_session(self._phone_host, self._confirm_token)
+                self._client.confirm_session(self._phone_host, self._confirm_token)
                 self._on_session_started()
             except Exception as e:
                 logger.error("Confirm session failed: %s", e)
@@ -350,8 +350,8 @@ class PhoneRemotePage(QWidget):
 
     def _on_stop_session(self) -> None:
         """Stop the remote session."""
-        client = get_phone_remote_client()
-        client.stop_session()
+        self._client = self._client or get_phone_remote_client()
+        self._client.stop_session()
         self._start_btn.setVisible(True)
         self._stop_btn.setVisible(False)
         self._file_up_btn.setEnabled(False)

@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import websockets
+from websockets.asyncio.client import ClientConnection
 
 logger = logging.getLogger("maya.wan_remote")
 
@@ -37,10 +38,12 @@ class WanRemoteClient:
         on_error: Callable[[str], None] | None = None,
         on_phone_frame: Callable[[bytes], None] | None = None,
         on_phone_input: Callable[[list], None] | None = None,
+        ca_path: str = "",
     ) -> None:
         self.relay_url = relay_url
         self.cert_path = cert_path
         self.key_path = key_path
+        self.ca_path = ca_path
         self.pairing_token = pairing_token
         self._on_connected = on_connected
         self._on_disconnected = on_disconnected
@@ -48,7 +51,7 @@ class WanRemoteClient:
         self._on_phone_frame = on_phone_frame
         self._on_phone_input = on_phone_input
 
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: ClientConnection | None = None
         self._ws_thread: threading.Thread | None = None
         self._stop_ws = threading.Event()
         self._session: WanSession | None = None
@@ -59,12 +62,12 @@ class WanRemoteClient:
         return self._ws is not None and not self._ws.closed
 
     def _build_ssl_context(self) -> ssl.SSLContext:
-        """Build SSL context with client cert + key."""
+        """Build a verifying SSL context. Self-signed relays need an explicit CA."""
+        if not self.ca_path:
+            raise ValueError("Relay CA path is required; refusing unverified TLS")
         context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        context.load_verify_locations(cafile=self.ca_path)
         context.load_cert_chain(self.cert_path, self.key_path)
-        # For self-signed relay, disable hostname verification
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
         return context
 
     def connect(self) -> bool:

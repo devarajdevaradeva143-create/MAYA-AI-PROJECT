@@ -1,5 +1,6 @@
 package com.devaraj.maya.ui.pairing
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -13,6 +14,10 @@ import com.devaraj.maya.data.remote.PairingRepository
 import com.devaraj.maya.data.remote.QrPayload
 import com.devaraj.maya.data.secure.DeviceIdentity
 import com.devaraj.maya.domain.model.Device
+import com.devaraj.maya.p2p.P2pManager
+import com.devaraj.maya.p2p.P2pState
+import com.devaraj.maya.p2p.P2pTurn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,7 +40,21 @@ data class PairingUiState(
     val errorReason: MayaErrorReason? = null,
     val errorMessage: String? = null,
     val paired: Device? = null,
-)
+    val p2pState: P2pState = P2pState.NEW,
+    val p2pPayload: String = "",
+    val p2pError: String? = null,
+    val p2pTurnHost: String = "",
+    val p2pTurnUsername: String = "",
+    val p2pTurnCredential: String = "",
+) {
+    val p2pTurnConfigured: Boolean
+        get() = p2pTurnHost.isNotBlank() &&
+            p2pTurnUsername.isNotBlank() &&
+            p2pTurnCredential.isNotBlank()
+
+    val p2pTurnEditable: Boolean
+        get() = p2pState == P2pState.NEW || p2pState == P2pState.CLOSED
+}
 
 class PairingViewModel(
     private val pairingRepository: PairingRepository,
@@ -43,6 +62,7 @@ class PairingViewModel(
     private val deviceIdentity: DeviceIdentity,
     private val discovery: LaptopDiscovery,
     private val settingsStore: SettingsStore,
+    private val context: Context,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PairingUiState())
@@ -50,6 +70,10 @@ class PairingViewModel(
 
     private val json = Json { ignoreUnknownKeys = true }
     private var discoveryJob: Job? = null
+    private var p2pManager: P2pManager? = null
+    private var p2pStateJob: Job? = null
+    private var p2pMessagesJob: Job? = null
+    private var p2pActionJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -233,6 +257,141 @@ class PairingViewModel(
         _state.update { it.copy(errorReason = null, errorMessage = null) }
     }
 
+    fun createP2pOffer() {
+        launchP2pAction { manager ->
+            _state.update { it.copy(p2pPayload = manager.createOffer()) }
+        }
+    }
+
+    fun acceptP2pOffer(text: String) {
+        val offer = text.trim()
+        if (offer.isEmpty()) {
+            _state.update { it.copy(p2pError = "Paste an offer first") }
+            return
+        }
+        launchP2pAction { manager ->
+            _state.update { it.copy(p2pPayload = manager.acceptOffer(offer)) }
+        }
+    }
+
+    fun acceptP2pAnswer(text: String) {
+        val answer = text.trim()
+        if (answer.isEmpty()) {
+            _state.update { it.copy(p2pError = "Paste an answer first") }
+            return
+        }
+        launchP2pAction { manager ->
+            manager.acceptAnswer(answer)
+            _state.update { it.copy(p2pPayload = "") }
+        }
+    }
+
+    fun closeP2p() {
+        val closeError = disposeP2p()
+        _state.update {
+            it.copy(
+                p2pState = P2pState.CLOSED,
+                p2pPayload = "",
+                p2pError = closeError,
+            )
+        }
+    }
+
+    fun onP2pTurnHostChange(value: String) {
+        _state.update { it.copy(p2pTurnHost = value, p2pError = null) }
+    }
+
+    fun onP2pTurnUsernameChange(value: String) {
+        _state.update { it.copy(p2pTurnUsername = value, p2pError = null) }
+    }
+
+    fun onP2pTurnCredentialChange(value: String) {
+        _state.update { it.copy(p2pTurnCredential = value, p2pError = null) }
+    }
+
+    private fun launchP2pAction(action: suspend (P2pManager) -> Unit) {
+        val manager = ensureP2pManager() ?: return
+        p2pActionJob?.cancel()
+        p2pActionJob = viewModelScope.launch {
+            _state.update { it.copy(p2pError = null, p2pPayload = "") }
+            try {
+                action(manager)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(p2pError = error.message ?: "P2P operation failed")
+                }
+            }
+        }
+    }
+
+    private fun ensureP2pManager(): P2pManager? {
+        p2pManager?.let { return it }
+        val current = _state.value
+        // No relay is configured unless the user supplies all TURN fields.
+        val turn = if (current.p2pTurnConfigured) {
+            P2pTurn(
+                host = current.p2pTurnHost.trim(),
+                username = current.p2pTurnUsername.trim(),
+                credential = current.p2pTurnCredential,
+            )
+        } else {
+            null
+        }
+
+        val manager = try {
+            P2pManager(context = context.applicationContext, stunServers = STUN_SERVERS, turn = turn)
+        } catch (error: Exception) {
+            _state.update { it.copy(p2pError = error.message ?: "P2P is unavailable") }
+            return null
+        }
+        p2pManager = manager
+
+        p2pStateJob = viewModelScope.launch {
+            manager.state
+                .catch { error ->
+                    _state.update { it.copy(p2pError = error.message ?: "P2P state error") }
+                }
+                .collect { p2pState ->
+                    _state.update { currentState ->
+                        currentState.copy(
+                            p2pState = p2pState,
+                            p2pError = when (p2pState) {
+                                P2pState.FAILED -> currentState.p2pError ?: "P2P connection failed"
+                                P2pState.NEW, P2pState.CLOSED -> null
+                                else -> currentState.p2pError
+                            },
+                        )
+                    }
+                }
+        }
+        p2pMessagesJob = viewModelScope.launch {
+            manager.messages
+                .catch { error ->
+                    _state.update { it.copy(p2pError = error.message ?: "P2P message error") }
+                }
+                .collect { message ->
+                    // Display only: no received payload is ever treated as a command.
+                    _state.update { it.copy(p2pPayload = message.payload) }
+                }
+        }
+        return manager
+    }
+
+    /** Returns a close error message, if any. Never throws while tearing down. */
+    private fun disposeP2p(): String? {
+        p2pActionJob?.cancel()
+        p2pStateJob?.cancel()
+        p2pMessagesJob?.cancel()
+        p2pActionJob = null
+        p2pStateJob = null
+        p2pMessagesJob = null
+        val manager = p2pManager
+        p2pManager = null
+        return manager?.let { runCatching { it.close() }.exceptionOrNull()?.message }
+    }
+
     fun stopDiscovery() {
         discoveryJob?.cancel()
         discoveryJob = null
@@ -242,11 +401,13 @@ class PairingViewModel(
     /** Called when leaving the pairing flow so the next visit starts clean. */
     fun reset() {
         stopDiscovery()
+        closeP2p()
         _state.value = PairingUiState(discovering = false)
     }
 
     override fun onCleared() {
         discoveryJob?.cancel()
+        disposeP2p()
         super.onCleared()
     }
 
@@ -256,6 +417,7 @@ class PairingViewModel(
         private val deviceIdentity: DeviceIdentity,
         private val discovery: LaptopDiscovery,
         private val settingsStore: SettingsStore,
+        private val context: Context,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -268,11 +430,17 @@ class PairingViewModel(
                 deviceIdentity,
                 discovery,
                 settingsStore,
+                context,
             ) as T
         }
     }
 
     companion object {
         const val PIN_LENGTH = 6
+
+        private val STUN_SERVERS = listOf(
+            "stun:stun.l.google.com:19302",
+            "stun:stun1.l.google.com:19302",
+        )
     }
 }

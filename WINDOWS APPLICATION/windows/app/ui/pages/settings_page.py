@@ -19,8 +19,10 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -34,6 +36,7 @@ from app.services.cloud_service import CloudAdapter
 from app.services.engine_service import EngineAdapter
 from app.services.model_service import ModelService
 from app.services.phone_remote_client import reset_phone_remote_client
+from app.services.p2p_service import get_p2p_service
 import io
 import json
 import socket
@@ -129,6 +132,7 @@ class SettingsPage(QScrollArea):
         self._build_phone_remote()
         self._build_bluetooth_remote()
         self._build_wan_remote()
+        self._build_p2p()
         self._build_server()
         self._build_footer()
 
@@ -711,7 +715,7 @@ class SettingsPage(QScrollArea):
         )
 
         self._wan_remote_enable = QCheckBox("Enable Internet/WAN remote control")
-        self._wan_remote_enable.setChecked(bool(self._repository.get("wan_remote.enabled", False)))
+        self._wan_remote_enable.setChecked(bool(self._repository.get("server.wan.enabled", False)))
         self._wan_remote_enable.toggled.connect(self._on_wan_remote_toggled)
         layout.addWidget(self._wan_remote_enable)
 
@@ -723,7 +727,7 @@ class SettingsPage(QScrollArea):
         self._wan_relay_url = QComboBox()
         self._wan_relay_url.setEditable(True)
         self._wan_relay_url.addItems(["wss://relay.example.com:443", "wss://your-relay:8443"])
-        current_url = str(self._repository.get("wan_remote.relay_url", ""))
+        current_url = str(self._repository.get("server.wan.relay_url", ""))
         if current_url:
             self._wan_relay_url.setCurrentText(current_url)
         relay_row.addWidget(relay_label)
@@ -738,7 +742,7 @@ class SettingsPage(QScrollArea):
         self._wan_cert_path = QComboBox()
         self._wan_cert_path.setEditable(True)
         self._wan_cert_path.addItems(["MAYA AI/security/certs/wan_cert.pem"])
-        current_cert = str(self._repository.get("wan_remote.cert_path", ""))
+        current_cert = str(self._repository.get("server.wan.cert_path", ""))
         if current_cert:
             self._wan_cert_path.setCurrentText(current_cert)
         cert_row.addWidget(cert_label)
@@ -753,7 +757,7 @@ class SettingsPage(QScrollArea):
         self._wan_key_path = QComboBox()
         self._wan_key_path.setEditable(True)
         self._wan_key_path.addItems(["MAYA AI/security/certs/wan_key.pem"])
-        current_key = str(self._repository.get("wan_remote.key_path", ""))
+        current_key = str(self._repository.get("server.wan.key_path", ""))
         if current_key:
             self._wan_key_path.setCurrentText(current_key)
         key_row.addWidget(key_label)
@@ -770,10 +774,10 @@ class SettingsPage(QScrollArea):
         """Update setting and reset client."""
         try:
             self._repository.update({
-                "wan_remote.enabled": bool(checked),
-                "wan_remote.relay_url": self._wan_relay_url.currentText(),
-                "wan_remote.cert_path": self._wan_cert_path.currentText(),
-                "wan_remote.key_path": self._wan_key_path.currentText(),
+                "server.wan.enabled": bool(checked),
+                "server.wan.relay_url": self._wan_relay_url.currentText(),
+                "server.wan.cert_path": self._wan_cert_path.currentText(),
+                "server.wan.key_path": self._wan_key_path.currentText(),
             })
         except SettingsError as exc:
             self._wan_remote_status.setText(f"Status: Error — {exc}")
@@ -782,12 +786,170 @@ class SettingsPage(QScrollArea):
         self._refresh_wan_remote_state()
 
     def _refresh_wan_remote_state(self) -> None:
-        enabled = bool(self._repository.get("wan_remote.enabled", False))
+        enabled = bool(self._repository.get("server.wan.enabled", False))
         self._wan_remote_enable.setChecked(enabled)
         if enabled:
             self._wan_remote_status.setText("Status: Enabled — configure relay URL + certs, then connect")
         else:
             self._wan_remote_status.setText("Status: Disabled")
+
+    # -- internet p2p -------------------------------------------------
+    def _build_p2p(self) -> None:
+        card, layout = _card(
+            "Internet P2P",
+            "Direct WebRTC from anywhere. Manual QR/code only. No cloud data server.",
+        )
+        self._p2p_enable = QCheckBox("Enable Internet P2P")
+        self._p2p_enable.setChecked(bool(self._repository.get("p2p.enabled", False)))
+        self._p2p_enable.toggled.connect(self._on_p2p_toggled)
+        layout.addWidget(self._p2p_enable)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._p2p_offer_btn = QPushButton("Create offer QR")
+        self._p2p_offer_btn.clicked.connect(self._on_p2p_offer)
+        self._p2p_answer_btn = QPushButton("Paste answer")
+        self._p2p_answer_btn.clicked.connect(self._on_p2p_answer)
+        self._p2p_close_btn = QPushButton("Disconnect")
+        self._p2p_close_btn.clicked.connect(self._on_p2p_close)
+        row.addWidget(self._p2p_offer_btn)
+        row.addWidget(self._p2p_answer_btn)
+        row.addWidget(self._p2p_close_btn)
+        layout.addLayout(row)
+
+        control_row = QHBoxLayout()
+        control_row.setSpacing(8)
+        self._p2p_pending_label = QLabel("Pending controls: 0")
+        self._p2p_pending_label.setObjectName("emptyHint")
+        self._p2p_approve_btn = QPushButton("Approve input")
+        self._p2p_approve_btn.clicked.connect(self._on_p2p_approve)
+        self._p2p_deny_btn = QPushButton("Deny input")
+        self._p2p_deny_btn.clicked.connect(self._on_p2p_deny)
+        control_row.addWidget(self._p2p_pending_label)
+        control_row.addWidget(self._p2p_approve_btn)
+        control_row.addWidget(self._p2p_deny_btn)
+        layout.addLayout(control_row)
+
+        self._p2p_status = QLabel("Status: Disabled")
+        self._p2p_status.setObjectName("emptyHint")
+        self._p2p_status.setWordWrap(True)
+        layout.addWidget(self._p2p_status)
+
+        self._p2p_qr_label = QLabel()
+        self._p2p_qr_label.setAlignment(Qt.AlignCenter)
+        self._p2p_qr_label.setMinimumHeight(180)
+        self._p2p_qr_label.hide()
+        layout.addWidget(self._p2p_qr_label)
+
+        self._p2p_text = QPlainTextEdit()
+        self._p2p_text.setReadOnly(True)
+        self._p2p_text.setMaximumHeight(64)
+        self._p2p_text.hide()
+        layout.addWidget(self._p2p_text)
+
+        self._layout.addWidget(card)
+        self._refresh_p2p_state()
+
+    def _on_p2p_toggled(self, checked: bool) -> None:
+        try:
+            self._repository.update({"p2p.enabled": bool(checked)})
+        except SettingsError as exc:
+            self._p2p_status.setText(f"Status: Error — {exc}")
+            return
+        if not checked:
+            get_p2p_service().close()
+            self._p2p_qr_label.hide()
+            self._p2p_text.hide()
+        self._refresh_p2p_state()
+
+    def _refresh_p2p_state(self) -> None:
+        enabled = bool(self._repository.get("p2p.enabled", False))
+        status = get_p2p_service().status()
+        mode = "relay" if status.get("relay") else "direct"
+        state = str(status.get("state", "new"))
+        pending = int(status.get("pending_controls", 0) or 0)
+        self._p2p_enable.setChecked(enabled)
+        self._p2p_pending_label.setText(f"Pending controls: {pending}")
+        self._p2p_approve_btn.setEnabled(pending > 0)
+        self._p2p_deny_btn.setEnabled(pending > 0)
+        if not enabled:
+            self._p2p_status.setText("Status: Disabled")
+        else:
+            self._p2p_status.setText(f"Status: {state} ({mode}) — device {status.get('device_id', '')}")
+
+    def _on_p2p_offer(self) -> None:
+        result = get_p2p_service().create_offer()
+        if not result.get("ok"):
+            self._p2p_status.setText(f"Status: {result.get('error', result.get('code'))}")
+            return
+        payload = str(result.get("payload", ""))
+        try:
+            import qrcode
+
+            image = qrcode.make(payload)
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            qimage = QImage()
+            qimage.loadFromData(buf.getvalue(), "PNG")
+            self._p2p_qr_label.setPixmap(
+                QPixmap.fromImage(qimage).scaled(220, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            self._p2p_qr_label.show()
+        except Exception as exc:  # noqa: BLE001 - QR is display-only
+            self._p2p_qr_label.hide()
+            self._p2p_status.setText(f"Status: QR error — {exc}")
+        self._p2p_text.setPlainText(payload)
+        self._p2p_text.show()
+        self._p2p_status.setText("Status: offer ready — share QR/code with phone")
+
+    def _on_p2p_answer(self) -> None:
+        text, ok = QInputDialog.getMultiLineText(self, "Maya P2P", "Paste the answer from phone:")
+        if not ok or not text.strip():
+            return
+        result = get_p2p_service().accept_answer(text.strip())
+        if result.get("ok"):
+            self._p2p_status.setText("Status: connected")
+        else:
+            self._p2p_status.setText(f"Status: {result.get('error', result.get('code'))}")
+        self._refresh_p2p_state()
+
+    def _on_p2p_approve(self) -> None:
+        pending = get_p2p_service().pending_controls()
+        if not pending:
+            self._refresh_p2p_state()
+            return
+        detail = pending[0].get("details", {})
+        preview = json.dumps(detail, ensure_ascii=False)[:400]
+        answer = QMessageBox.question(
+            self,
+            "Maya P2P",
+            f"Allow this remote input?\n\n{preview}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        allowed = answer == QMessageBox.StandardButton.Yes
+        result = get_p2p_service().approve_next_control(
+            confirm=lambda _action, _details: allowed
+        )
+        if result.get("ok"):
+            self._p2p_status.setText("Status: remote input approved")
+        else:
+            self._p2p_status.setText(f"Status: {result.get('error', result.get('code'))}")
+        self._refresh_p2p_state()
+
+    def _on_p2p_deny(self) -> None:
+        result = get_p2p_service().deny_next_control()
+        if result.get("ok"):
+            self._p2p_status.setText("Status: remote input denied")
+        else:
+            self._p2p_status.setText(f"Status: {result.get('error', result.get('code'))}")
+        self._refresh_p2p_state()
+
+    def _on_p2p_close(self) -> None:
+        get_p2p_service().close()
+        self._p2p_qr_label.hide()
+        self._p2p_text.hide()
+        self._refresh_p2p_state()
 
     # -- phone server -------------------------------------------------
 
@@ -795,6 +957,7 @@ class SettingsPage(QScrollArea):
         self._refresh_engine_state()
         self._refresh_cloud_state()
         self._refresh_server_state()
+        self._refresh_p2p_state()
         super().showEvent(event)
 
     def shutdown(self) -> None:

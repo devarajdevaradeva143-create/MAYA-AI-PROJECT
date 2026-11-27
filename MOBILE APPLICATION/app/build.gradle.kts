@@ -124,6 +124,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.zxing.embedded)
     implementation(libs.vosk.android)
+    implementation(libs.webrtc.google)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver)

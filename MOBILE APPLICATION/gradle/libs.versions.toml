@@ -15,6 +15,9 @@ serialization = "1.8.1"
 zxing = "4.3.0"
 vosk = "0.3.75"
 sherpaOnnx = "2.0.1"
+# Stable published WebRTC AAR on Maven Central (org.webrtc classes).
+# org.webrtc:google-webrtc:1.0.32006 is no longer published on Google Maven or Central.
+webrtc = "1.0.43591"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -51,6 +54,7 @@ retrofit-serialization = { module = "com.jakewharton.retrofit:retrofit2-kotlinx-
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 zxing-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxing" }
 vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "vosk" }
+webrtc-google = { module = "com.infobip:google-webrtc", version.ref = "webrtc" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJunit" }

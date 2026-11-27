@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import requests
 import websockets
-from websockets.client import WebSocketClientProtocol
+from websockets.asyncio.client import ClientConnection
 
 from app.services.server_service import shared_server_service
 
@@ -42,7 +42,7 @@ class PhoneRemoteClient:
         self._on_error = on_error
         self._on_status = on_status
         self._session: PhoneRemoteSession | None = None
-        self._ws: WebSocketClientProtocol | None = None
+        self._ws: ClientConnection | None = None
         self._ws_thread: threading.Thread | None = None
         self._stop_ws = threading.Event()
         self._phone_base_url: str | None = None

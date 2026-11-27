@@ -130,8 +130,8 @@ def _as_text(max_length: int = 200) -> Callable[[Any], str]:
 def _as_url(value: Any) -> str:
     text = _as_text(300)(value)
     parsed = urlparse(text)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise SettingsError("must be an http:// or https:// address")
+    if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.netloc:
+        raise SettingsError("must be an http://, https://, ws:// or wss:// address")
     return text.rstrip("/")
 
 
@@ -222,10 +222,14 @@ _SCHEMA: dict[str, Callable[[Any], Any]] = {
     "ui.confirm_destructive": _as_bool,
     "phone_remote.enabled": _as_bool,
     "bluetooth_remote.enabled": _as_bool,
-    "wan_remote.enabled": _as_bool,
-    "wan_remote.relay_url": _as_url,
-    "wan_remote.cert_path": _as_text(300),
-    "wan_remote.key_path": _as_text(300),
+    "server.wan.enabled": _as_bool,
+    "server.wan.host": _as_text(120),
+    "server.wan.relay_url": _as_url,
+    "server.wan.cert_path": _as_text(300),
+    "server.wan.key_path": _as_text(300),
+    "server.wan.mode": _as_choice("lan", "wan"),
+    "p2p.enabled": _as_bool,
+    "p2p.screen_fps": _as_int(1, 30),
 }
 
 

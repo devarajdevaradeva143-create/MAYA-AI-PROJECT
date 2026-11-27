@@ -35,6 +35,8 @@ a = Analysis(
         'cmudict', 'uraikal', 'uraikal.numbers',
         'torch', 'onnxruntime', 'safetensors', 'safetensors.torch',
         'scipy', 'soundfile',
+        'aiortc', 'aiortc.codecs', 'aiortc.contrib', 'av', 'asyncio', 'websockets',
+        'custom.tools.p2p',
     ] + vosk_hidden + cmudict_hidden + uraikal_hidden + onnx_hidden,
     hookspath=[],
     hooksconfig={},
