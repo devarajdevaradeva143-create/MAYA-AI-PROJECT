@@ -63,4 +63,10 @@ JARVIS/backups/security*
 
 # Vendored git repo (llama.cpp) — keep submodule-free
 MOBILE APP/app/src/main/cpp/llama.cpp/
-">
+
+# Internal AI plans / old docs / local binaries / sample voices / heavy native libs
+/.kilo/
+/MAYA PROJECT/
+MAYA AI/security/bin/
+MAYA AI/voice/samples/
+MOBILE APPLICATION/app/src/main/jniLibs/
