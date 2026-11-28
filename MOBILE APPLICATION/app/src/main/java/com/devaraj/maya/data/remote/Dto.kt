@@ -248,11 +248,23 @@ data class ScreenInfo(
 data class RemoteStartResponse(
     val status: String,
     @SerialName("confirm_token") val confirmToken: String? = null,
+    @SerialName("request_id") val requestId: String? = null,
     val description: String? = null,
     @SerialName("expires_in") val expiresIn: Int? = null,
     @SerialName("session_token") val sessionToken: String? = null,
     @SerialName("ws_url") val wsUrl: String? = null,
     val screen: ScreenInfo? = null,
+)
+
+@Serializable
+data class RemoteRequestStatusResponse(
+    val status: String,
+    @SerialName("request_id") val requestId: String? = null,
+    @SerialName("session_token") val sessionToken: String? = null,
+    @SerialName("ws_url") val wsUrl: String? = null,
+    @SerialName("expires_in") val expiresIn: Int? = null,
+    val screen: ScreenInfo? = null,
+    val description: String? = null,
 )
 
 @Serializable

@@ -8,13 +8,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.devaraj.maya.data.prefs.ThemeMode
+import com.devaraj.maya.service.PhoneRemoteHttpServer
 import com.devaraj.maya.service.WakeForegroundService
 import com.devaraj.maya.ui.MayaViewModel
 import com.devaraj.maya.ui.main.MayaMainScreen
@@ -38,6 +42,7 @@ class MainActivity : ComponentActivity() {
             )
             val settings by viewModel.settings.collectAsStateWithLifecycle()
             val wakeRequest by wakeRequests.collectAsStateWithLifecycle()
+            val pendingRemote by PhoneRemoteHttpServer.pendingRequest.collectAsStateWithLifecycle()
 
             val current = settings
             if (current == null) {
@@ -73,6 +78,21 @@ class MainActivity : ComponentActivity() {
                         )
                     } else {
                         OnboardingScreen(onFinish = viewModel::completeOnboarding)
+                    }
+
+                    val req = pendingRemote
+                    if (req != null && req.status.name == "PENDING") {
+                        AlertDialog(
+                            onDismissRequest = { PhoneRemoteHttpServer.denyRequest(req.id) },
+                            title = { Text("Allow remote control?") },
+                            text = { Text("Laptop indha phone-a control panna permission kekkudhu. Allow panna mattum screen/input share aagum.") },
+                            confirmButton = {
+                                TextButton(onClick = { PhoneRemoteHttpServer.approveRequest(req.id) }) { Text("Allow") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { PhoneRemoteHttpServer.denyRequest(req.id) }) { Text("Deny") }
+                            },
+                        )
                     }
                 }
             }

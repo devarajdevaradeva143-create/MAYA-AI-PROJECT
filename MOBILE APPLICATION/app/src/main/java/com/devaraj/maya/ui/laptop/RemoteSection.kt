@@ -4,15 +4,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,20 +25,15 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.devaraj.maya.data.remote.FileEntryDto
 import com.devaraj.maya.domain.model.OperatingMode
@@ -57,7 +47,6 @@ fun RemoteSection(
     modifier: Modifier = Modifier,
 ) {
     val state by vm.state.collectAsState()
-    val context = LocalContext.current
 
     val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) vm.upload(uri)
@@ -150,56 +139,32 @@ fun RemoteSection(
 
 @Composable
 private fun ScreenTab(state: RemoteUiState, vm: RemoteViewModel) {
-    var boxSize by remember { mutableStateOf(IntSize.Zero) }
     var text by remember { mutableStateOf("") }
+    var keysExpanded by remember { mutableStateOf(false) }
+    var fullscreen by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(state.sessionActive) {
+        if (!state.sessionActive) fullscreen = false
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
+        RemoteScreen(
+            bitmap = state.screenBitmap,
+            loading = state.screenLoading,
+            error = state.screenError,
+            onTap = { p ->
+                vm.sendMove(p.x, p.y)
+                vm.click("left")
+            },
+            onLongPress = { p ->
+                vm.sendMove(p.x, p.y)
+                vm.click("right")
+            },
+            onDrag = { p -> vm.sendMove(p.x, p.y) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
-                .onSizeChanged { boxSize = it }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { off ->
-                            if (boxSize.width > 0 && boxSize.height > 0) {
-                                val nx = (off.x / boxSize.width).coerceIn(0f, 1f)
-                                val ny = (off.y / boxSize.height).coerceIn(0f, 1f)
-                                vm.sendMove(nx, ny)
-                                vm.click("left")
-                            }
-                        },
-                        onLongPress = { off ->
-                            if (boxSize.width > 0 && boxSize.height > 0) {
-                                val nx = (off.x / boxSize.width).coerceIn(0f, 1f)
-                                val ny = (off.y / boxSize.height).coerceIn(0f, 1f)
-                                vm.sendMove(nx, ny)
-                                vm.click("right")
-                            }
-                        },
-                    )
-                }
-                .pointerInput("drag") {
-                    detectDragGestures { change, _ ->
-                        if (boxSize.width > 0 && boxSize.height > 0) {
-                            val nx = (change.position.x / boxSize.width).coerceIn(0f, 1f)
-                            val ny = (change.position.y / boxSize.height).coerceIn(0f, 1f)
-                            vm.sendMove(nx, ny)
-                        }
-                        change.consume()
-                    }
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            val bmp = state.screenBitmap
-            if (bmp != null) {
-                Image(bitmap = bmp.asImageBitmap(), contentDescription = "Screen", modifier = Modifier.fillMaxSize())
-            } else if (state.screenLoading) {
-                CircularProgressIndicator()
-            } else {
-                Text(text = state.screenError ?: "No frame yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+                .height(260.dp),
+        )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { vm.scroll(3) }) { Text("Scroll up") }
@@ -215,6 +180,20 @@ private fun ScreenTab(state: RemoteUiState, vm: RemoteViewModel) {
             OutlinedButton(onClick = { vm.sendKey("tab") }) { Text("Tab") }
         }
 
+        TextButton(onClick = { keysExpanded = !keysExpanded }) {
+            Text(if (keysExpanded) "Hide keys" else "More keys")
+        }
+        if (keysExpanded) {
+            RemoteKeypad(onKey = vm::sendKey)
+        }
+
+        OutlinedButton(
+            onClick = { fullscreen = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("⛶ Fullscreen")
+        }
+
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = text,
@@ -224,6 +203,48 @@ private fun ScreenTab(state: RemoteUiState, vm: RemoteViewModel) {
                 modifier = Modifier.weight(1f),
             )
             Button(onClick = { vm.sendText(text); text = "" }) { Text("Send") }
+        }
+    }
+
+    if (fullscreen) {
+        FullscreenScreenDialog(state = state, vm = vm, onClose = { fullscreen = false })
+    }
+}
+
+/** Keypad rows: label -> key name in the laptop server's REMOTE_KEYS allowlist. */
+private val KEYPAD_ROWS = listOf(
+    listOf("↑ Up" to "up", "↓ Down" to "down", "← Left" to "left", "→ Right" to "right"),
+    listOf("Home" to "home", "End" to "end", "PgUp" to "pageup", "PgDn" to "pagedown"),
+    listOf("Del" to "delete", "Space" to "space", "Tab" to "tab", "Esc" to "esc"),
+    listOf("Cut" to "ctrl+x", "Undo" to "ctrl+z", "Alt+Tab" to "alt+tab", "F5" to "f5"),
+)
+
+/**
+ * Full on-screen keypad for remote control. Kept VM-free so it can be tested
+ * on its own; every key matches the server's remote-input allowlist.
+ */
+@Composable
+fun RemoteKeypad(onKey: (String) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        KEYPAD_ROWS.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { (label, key) ->
+                    OutlinedButton(
+                        onClick = { onKey(key) },
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+            }
         }
     }
 }

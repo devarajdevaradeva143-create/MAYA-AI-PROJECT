@@ -240,6 +240,7 @@ server:
 
 # internet P2P — direct WebRTC, manual signaling, no cloud data
 # STUN = address helper only. TURN is used ONLY when the owner configures it.
+  auto_start: false
 p2p:
   enabled: false              # Settings → Internet P2P → on
   manual_signaling: true      # offer/answer QR or copy/paste; no signaling server

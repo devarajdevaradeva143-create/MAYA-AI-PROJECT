@@ -17,8 +17,9 @@ import androidx.annotation.RequiresApi
 import com.devaraj.maya.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -89,9 +90,13 @@ class ScreenCaptureService private constructor(
     private val frameCount = AtomicInteger(0)
     private var lastFrameTime = 0L
 
-    // Frame output channel for WebSocket consumers
-    private val frameChannel = Channel<ByteArray>(capacity = 5)
-    val frames: ReceiveChannel<ByteArray> = frameChannel
+    // Frame output for WebSocket consumers (broadcast).
+    private val _frames = MutableSharedFlow<ByteArray>(
+        replay = 1,
+        extraBufferCapacity = 2,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val frames: SharedFlow<ByteArray> = _frames
 
     // State flow for monitoring
     private val _state = MutableStateFlow(CaptureState.IDLE)
@@ -157,7 +162,7 @@ class ScreenCaptureService private constructor(
             val jpeg = imageToJpeg(image)
             if (jpeg != null && jpeg.isNotEmpty()) {
                 frameCount.incrementAndGet()
-                frameChannel.trySend(jpeg)
+                _frames.tryEmit(jpeg)
             }
         } finally {
             image.close()
@@ -215,7 +220,6 @@ class ScreenCaptureService private constructor(
         }
 
         handlerThread.quitSafely()
-        frameChannel.close()
         _state.value = CaptureState.IDLE
         Log.d(TAG, "Screen capture stopped. Frames captured: ${frameCount.get()}")
     }

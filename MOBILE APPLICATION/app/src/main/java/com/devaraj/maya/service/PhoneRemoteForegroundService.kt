@@ -64,6 +64,7 @@ class PhoneRemoteForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                PhoneRemoteHttpServer.getInstance()?.stopAllSessions()
                 setRunning(false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()

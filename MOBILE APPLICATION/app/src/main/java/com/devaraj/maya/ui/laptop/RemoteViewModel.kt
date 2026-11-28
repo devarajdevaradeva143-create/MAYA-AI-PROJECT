@@ -50,6 +50,7 @@ data class RemoteUiState(
     val screenBitmap: Bitmap? = null,
     val screenError: String? = null,
     val screenLoading: Boolean = false,
+    val screenHighRes: Boolean = false,
     val selectedTab: Int = 0,
     val fileRoots: List<String> = emptyList(),
     val filePath: String? = null,
@@ -229,7 +230,11 @@ class RemoteViewModel(
         screenJob = viewModelScope.launch {
             var errors = 0
             while (isActive && _state.value.sessionActive && _state.value.selectedTab == 0) {
-                val res = apiCall { apiClient.api(conn.device.host, conn.device.port).screen(token, 1280, 60) }
+                val highRes = _state.value.screenHighRes
+                val res = apiCall {
+                    apiClient.api(conn.device.host, conn.device.port)
+                        .screen(token, if (highRes) 1920 else 1280, if (highRes) 70 else 60)
+                }
                 res.fold(
                     onSuccess = { body ->
                         errors = 0
@@ -260,6 +265,11 @@ class RemoteViewModel(
     fun stopScreenPolling() {
         screenJob?.cancel()
         screenJob = null
+    }
+
+    /** Fullscreen mode polls a sharper frame; normal preview keeps the light one. */
+    fun setHighResScreen(enabled: Boolean) {
+        _state.update { it.copy(screenHighRes = enabled) }
     }
 
     // ---- input ----

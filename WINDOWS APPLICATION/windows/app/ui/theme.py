@@ -230,6 +230,12 @@ def build_qss(palette: Palette, base_font_size: int = 14) -> str:
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0;
     }}
+    QSplitter::handle {{
+        background: transparent;
+    }}
+    QSplitter::handle:hover {{
+        background: {p.surface_high};
+    }}
     QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
         background-color: {p.surface};
         border: 1px solid {p.border};

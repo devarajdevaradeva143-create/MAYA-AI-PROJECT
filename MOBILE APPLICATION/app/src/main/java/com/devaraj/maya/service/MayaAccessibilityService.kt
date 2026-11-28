@@ -227,23 +227,48 @@ class MayaAccessibilityService : AccessibilityService() {
     }
 
     private fun injectKey(key: String): Boolean {
-        val keyCode = when (key.lowercase()) {
-            "back" -> KeyEvent.KEYCODE_BACK
-            "home" -> KeyEvent.KEYCODE_HOME
-            "recents" -> KeyEvent.KEYCODE_APP_SWITCH
-            "enter" -> KeyEvent.KEYCODE_ENTER
-            "escape" -> KeyEvent.KEYCODE_ESCAPE
-            "tab" -> KeyEvent.KEYCODE_TAB
-            "space" -> KeyEvent.KEYCODE_SPACE
-            "delete" -> KeyEvent.KEYCODE_DEL
-            else -> return false
+        return when (key.lowercase()) {
+            "back" -> performGlobalAction(GLOBAL_ACTION_BACK)
+            "home" -> performGlobalAction(GLOBAL_ACTION_HOME)
+            "recents", "app_switch" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
+            "enter" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val focused = findFocusedEditable(rootInActiveWindow)
+                    focused?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id) == true
+                } else false
+            }
+            "escape", "esc" -> performGlobalAction(GLOBAL_ACTION_BACK)
+            "tab" -> appendToFocused("\t")
+            "space" -> appendToFocused(" ")
+            "delete", "backspace", "del" -> deleteFromFocused()
+            "up" -> performGlobalAction(GLOBAL_ACTION_DPAD_UP.takeIf { Build.VERSION.SDK_INT >= 0 } ?: 0).takeIf { false } ?: scrollFocused(forward = false)
+            "down" -> scrollFocused(forward = true)
+            "left", "right" -> false
+            else -> false
         }
-        return performGlobalAction(when (keyCode) {
-            KeyEvent.KEYCODE_BACK -> GLOBAL_ACTION_BACK
-            KeyEvent.KEYCODE_HOME -> GLOBAL_ACTION_HOME
-            KeyEvent.KEYCODE_APP_SWITCH -> GLOBAL_ACTION_RECENTS
-            else -> return false
-        })
+    }
+
+    private fun appendToFocused(s: String): Boolean {
+        val node = findFocusedEditable(rootInActiveWindow) ?: return false
+        val current = node.text?.toString().orEmpty()
+        val args = android.os.Bundle()
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, current + s)
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    private fun deleteFromFocused(): Boolean {
+        val node = findFocusedEditable(rootInActiveWindow) ?: return false
+        val current = node.text?.toString().orEmpty()
+        if (current.isEmpty()) return false
+        val args = android.os.Bundle()
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, current.dropLast(1))
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    private fun scrollFocused(forward: Boolean): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val node = findScrollableNode(root) ?: return false
+        return node.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
     }
 
     private fun injectScroll(dx: Int, dy: Int): Boolean {

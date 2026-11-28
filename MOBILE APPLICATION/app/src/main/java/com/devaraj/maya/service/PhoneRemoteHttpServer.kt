@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import com.devaraj.maya.MayaApp
 import com.devaraj.maya.data.remote.ApiError
 import com.devaraj.maya.data.remote.ApiErrorEnvelope
 import com.devaraj.maya.data.remote.FileEntryDto
@@ -14,6 +15,7 @@ import com.devaraj.maya.data.remote.InputEventDto
 import com.devaraj.maya.data.remote.InputRequest
 import com.devaraj.maya.data.remote.InputResponse
 import com.devaraj.maya.data.remote.RemoteConfirmRequest
+import com.devaraj.maya.data.remote.RemoteRequestStatusResponse
 import com.devaraj.maya.data.remote.RemoteSessionDto
 import com.devaraj.maya.data.remote.RemoteStartResponse
 import com.devaraj.maya.data.remote.RemoteStopRequest
@@ -23,13 +25,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayOutputStream
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -63,38 +69,45 @@ class PhoneRemoteHttpServer private constructor(
 
     companion object {
         private const val TAG = "PhoneRemoteHttpServer"
-        private const val PORT = 8421
+        const val PORT = 8421
         private const val SESSION_TTL_MS = 5 * 60 * 1000 // 5 minutes
         private const val MAX_UPLOAD_BYTES = 25L * 1024 * 1024
         private const val TOKEN_PREFIX = "maya_"
         private const val TOKEN_RANDOM_CHARS = 43
+        private const val REQUEST_TTL_MS = 60_000L
 
         @Volatile
         private var instance: PhoneRemoteHttpServer? = null
 
         private val sessions = ConcurrentHashMap<String, RemoteSession>()
-        private val pendingConfirmations = ConcurrentHashMap<String, PendingConfirmation>()
+        private val pendingRequests = ConcurrentHashMap<String, PendingRequest>()
+
+        enum class RequestStatus { PENDING, ALLOWED, DENIED, EXPIRED, CONSUMED }
 
         data class RemoteSession(
             val token: String,
             val createdAt: Long,
             var lastAccessed: Long,
             val clientIp: String,
-            var frameChannel: Channel<ByteArray>? = null,
             var webSocketJob: Job? = null,
         ) {
             fun isExpired(): Boolean = System.currentTimeMillis() - lastAccessed > SESSION_TTL_MS
             fun touch() { lastAccessed = System.currentTimeMillis() }
         }
 
-        data class PendingConfirmation(
-            val token: String,
+        data class PendingRequest(
+            val id: String,
             val createdAt: Long,
-            val description: String,
             val clientIp: String,
+            val description: String,
+            @Volatile var status: RequestStatus = RequestStatus.PENDING,
+            @Volatile var sessionToken: String? = null,
         ) {
-            fun isExpired(): Boolean = System.currentTimeMillis() - createdAt > 30_000 // 30 seconds
+            fun isExpired(): Boolean = System.currentTimeMillis() - createdAt > REQUEST_TTL_MS
         }
+
+        private val _pendingRequest = MutableStateFlow<PendingRequest?>(null)
+        val pendingRequest: StateFlow<PendingRequest?> = _pendingRequest
 
         fun start(
             context: Context,
@@ -116,7 +129,8 @@ class PhoneRemoteHttpServer private constructor(
             instance = null
             sessions.values.forEach { it.webSocketJob?.cancel() }
             sessions.clear()
-            pendingConfirmations.clear()
+            pendingRequests.clear()
+            _pendingRequest.value = null
         }
 
         fun isRunning(): Boolean = instance?.isRunning?.get() == true
@@ -131,58 +145,98 @@ class PhoneRemoteHttpServer private constructor(
                     true
                 } else false
             }
-            pendingConfirmations.entries.removeIf { (_, confirm) -> confirm.isExpired() }
+            pendingRequests.entries.removeIf { (_, req) ->
+                if (req.isExpired() && req.status == RequestStatus.PENDING) req.status = RequestStatus.EXPIRED
+                req.isExpired() && req.status != RequestStatus.PENDING && req.status != RequestStatus.ALLOWED
+            }
+            val cur = _pendingRequest.value
+            if (cur != null && (cur.status != RequestStatus.PENDING || cur.isExpired())) {
+                _pendingRequest.value = null
+            }
         }
 
         fun createSession(clientIp: String): RemoteSession {
             cleanExpiredSessions()
-            // Max 1 session per laptop (by IP)
             sessions.values.removeIf { it.clientIp == clientIp && !it.isExpired() }
-
             val token = generateToken()
             val session = RemoteSession(token, System.currentTimeMillis(), System.currentTimeMillis(), clientIp)
             sessions[token] = session
             return session
         }
 
-        fun createPendingConfirmation(clientIp: String, description: String): PendingConfirmation {
-            val token = generateToken()
-            val confirm = PendingConfirmation(token, System.currentTimeMillis(), description, clientIp)
-            pendingConfirmations[token] = confirm
-            return confirm
+        fun createPendingRequest(clientIp: String, description: String): PendingRequest {
+            cleanExpiredSessions()
+            pendingRequests.values.removeIf { it.clientIp == clientIp && (it.isExpired() || it.status != RequestStatus.PENDING) }
+            val request = PendingRequest(
+                id = generateToken(),
+                createdAt = System.currentTimeMillis(),
+                clientIp = clientIp,
+                description = description,
+            )
+            pendingRequests[request.id] = request
+            _pendingRequest.value = request
+            return request
+        }
+
+        fun getRequest(id: String): PendingRequest? {
+            val req = pendingRequests[id] ?: return null
+            if (req.isExpired() && req.status == RequestStatus.PENDING) {
+                req.status = RequestStatus.EXPIRED
+                if (_pendingRequest.value?.id == id) _pendingRequest.value = null
+            }
+            return req
+        }
+
+        fun approveRequest(id: String): PendingRequest? {
+            val req = pendingRequests[id] ?: return null
+            if (req.isExpired()) {
+                req.status = RequestStatus.EXPIRED
+                if (_pendingRequest.value?.id == id) _pendingRequest.value = null
+                return null
+            }
+            if (req.status != RequestStatus.PENDING) return req
+            val session = createSession(req.clientIp)
+            req.sessionToken = session.token
+            req.status = RequestStatus.ALLOWED
+            if (_pendingRequest.value?.id == id) _pendingRequest.value = null
+            return req
+        }
+
+        fun denyRequest(id: String): PendingRequest? {
+            val req = pendingRequests[id] ?: return null
+            if (req.status == RequestStatus.PENDING) req.status = RequestStatus.DENIED
+            if (_pendingRequest.value?.id == id) _pendingRequest.value = null
+            return req
+        }
+
+        fun consumeAllowedRequest(id: String): PendingRequest? {
+            val req = pendingRequests[id] ?: return null
+            if (req.status == RequestStatus.ALLOWED) {
+                req.status = RequestStatus.CONSUMED
+            }
+            return req
         }
 
         fun validateSession(token: String, clientIp: String): RemoteSession? {
-            val session = sessions[token]
-            return if (session != null && session.clientIp == clientIp && !session.isExpired()) {
-                session.touch()
-                session
-            } else {
+            val session = sessions[token] ?: return null
+            if (session.clientIp != clientIp || session.isExpired()) {
                 sessions.remove(token)
-                null
+                return null
             }
+            session.touch()
+            return session
         }
 
-        fun validateConfirmation(token: String, clientIp: String): PendingConfirmation? {
-            val confirm = pendingConfirmations[token]
-            return if (confirm != null && confirm.clientIp == clientIp && !confirm.isExpired()) {
-                confirm
-            } else {
-                pendingConfirmations.remove(token)
-                null
-            }
-        }
-
-        fun consumeConfirmation(token: String): PendingConfirmation? {
-            return pendingConfirmations.remove(token)
-        }
+        fun hasActiveSession(clientIp: String): Boolean =
+            sessions.values.any { it.clientIp == clientIp && !it.isExpired() }
 
         private fun generateToken(): String {
             val random = SecureRandom()
-            val bytes = ByteArray(TOKEN_RANDOM_CHARS * 3 / 4) // ~32 bytes for 43 base64url chars
+            val bytes = ByteArray(TOKEN_RANDOM_CHARS * 3 / 4)
             random.nextBytes(bytes)
-            return TOKEN_PREFIX + android.util.Base64.encodeToString(bytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
-                .substring(0, TOKEN_RANDOM_CHARS)
+            return TOKEN_PREFIX + android.util.Base64.encodeToString(
+                bytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
+            ).substring(0, TOKEN_RANDOM_CHARS)
         }
 
         fun getSession(token: String): RemoteSession? = sessions[token]
@@ -256,21 +310,42 @@ class PhoneRemoteHttpServer private constructor(
             val parts = requestLine.split(' ')
             if (parts.size < 3) return
 
-            val method = parts[0]
+            val method = parts[0].uppercase()
             val path = parts[1]
             val headers = readHeaders(input)
             val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-            // Uploads carry binary multipart data: leave the stream untouched for the
-            // handler, which reads exactly content-length bytes.
             val isUpload = method == "POST" && path == "/phone/remote/files/upload"
             val body = if (!isUpload && contentLength > 0) readBody(input, contentLength) else ""
-
-            val clientIp = s.inetAddress.hostAddress
+            val clientIp = s.inetAddress.hostAddress ?: "unknown"
 
             try {
+                if (method == "OPTIONS") {
+                    sendResponse(output, 204, "", "text/plain")
+                    return
+                }
+                val sessionTokenCandidate = when {
+                    method == "POST" && path == "/phone/remote/stop" -> extractSessionToken(body)
+                    method == "POST" && path == "/phone/remote/input" -> extractSessionToken(body)
+                    method == "POST" && path == "/phone/remote/files/list" -> extractSessionToken(body)
+                    method == "GET" && path.startsWith("/phone/remote/files/download") -> Uri.parse("http://localhost$path").getQueryParameter("session_token")
+                    else -> null
+                }
+                val isPublic = (method == "POST" && path == "/phone/remote/start") ||
+                    (method == "GET" && path.startsWith("/phone/remote/request/")) ||
+                    (method == "POST" && path == "/phone/remote/confirm") ||
+                    (method == "POST" && path == "/phone/remote/files/upload") // upload handler validates session after multipart parse
+                val sessionOk = !sessionTokenCandidate.isNullOrBlank() && validateSession(sessionTokenCandidate, clientIp) != null
+                if (!isPublic && !sessionOk && !isAuthorized(headers, path)) {
+                    sendResponse(output, 401, "Unauthorized", "text/plain")
+                    return
+                }
                 when {
                     method == "POST" && path == "/phone/remote/start" -> handleStart(output, clientIp)
-                    method == "POST" && path == "/phone/remote/confirm" -> handleConfirm(output, body, clientIp, s.localAddress.hostAddress)
+                    method == "GET" && path.startsWith("/phone/remote/request/") -> {
+                        val id = path.removePrefix("/phone/remote/request/").substringBefore('?')
+                        handleRequestStatus(output, id, clientIp, s.localAddress.hostAddress ?: "127.0.0.1")
+                    }
+                    method == "POST" && path == "/phone/remote/confirm" -> handleConfirm(output, body, clientIp, s.localAddress.hostAddress ?: "127.0.0.1")
                     method == "POST" && path == "/phone/remote/stop" -> handleStop(output, body, clientIp)
                     method == "POST" && path == "/phone/remote/input" -> handleInput(output, body, clientIp)
                     method == "POST" && path == "/phone/remote/files/list" -> handleFileList(output, body, clientIp)
@@ -281,13 +356,44 @@ class PhoneRemoteHttpServer private constructor(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Request failed: $method $path", e)
-                try {
-                    sendResponse(output, 500, "Internal error", "text/plain")
-                } catch (_: Exception) {
-                    // Socket already closed by the failing handler.
-                }
+                try { sendResponse(output, 500, "Internal error", "text/plain") } catch (_: Exception) {}
             }
         }
+    }
+
+    private fun isAuthorized(headers: Map<String, String>, path: String = ""): Boolean {
+        // WS can carry token in query; HTTP uses Bearer.
+        val auth = headers["authorization"]?.trim().orEmpty()
+        val bearer = if (auth.startsWith("Bearer ", ignoreCase = true)) auth.substringAfter(' ').trim() else ""
+        val queryToken = Uri.parse("http://localhost$path").getQueryParameter("token").orEmpty()
+        val token = bearer.ifBlank { queryToken }
+        if (token.isBlank()) return false
+        // Allow active session token for remote endpoints
+        if (sessions.containsKey(token)) return true
+        val app = context.applicationContext as? MayaApp ?: return false
+        val container = app.container
+        container.session.activeDeviceId?.let { id ->
+            container.tokenVault.load(id)?.let { if (constantTimeEquals(token, it)) return true }
+        }
+        val ids = runBlocking { container.database.deviceDao().getAll().map { it.id } }
+        for (id in ids) {
+            val expected = container.tokenVault.load(id) ?: continue
+            if (constantTimeEquals(token, expected)) return true
+        }
+        return false
+    }
+
+    private fun extractSessionToken(body: String): String? = try {
+        Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject["session_token"]?.jsonPrimitive?.content
+    } catch (_: Exception) { null }
+
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        val aa = a.toByteArray(StandardCharsets.UTF_8)
+        val bb = b.toByteArray(StandardCharsets.UTF_8)
+        if (aa.size != bb.size) return false
+        var r = 0
+        for (i in aa.indices) r = r or (aa[i].toInt() xor bb[i].toInt())
+        return r == 0
     }
 
     private fun readLine(input: java.io.InputStream): String? {
@@ -325,14 +431,13 @@ class PhoneRemoteHttpServer private constructor(
     }
 
     private fun sendResponse(output: java.io.OutputStream, status: Int, body: String, contentType: String) {
+        val bytes = body.toByteArray(StandardCharsets.UTF_8)
         val response = "HTTP/1.1 $status ${getStatusText(status)}\r\n" +
             "Content-Type: $contentType\r\n" +
-            "Content-Length: ${body.length}\r\n" +
-            "Access-Control-Allow-Origin: *\r\n" +
-            "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
-            "Access-Control-Allow-Headers: Content-Type\r\n" +
-            "Connection: close\r\n\r\n$body"
+            "Content-Length: ${bytes.size}\r\n" +
+            "Connection: close\r\n\r\n"
         output.write(response.toByteArray(StandardCharsets.UTF_8))
+        output.write(bytes)
         output.flush()
     }
 
@@ -353,90 +458,106 @@ class PhoneRemoteHttpServer private constructor(
     }
 
     private fun handleStart(output: java.io.OutputStream, clientIp: String) {
-        // Check if accessibility service is enabled
         if (!MayaAccessibilityService.isEnabled(context)) {
-            sendJson(output, 403, RemoteStartResponse(
-                status = "error",
-                description = "Accessibility service not enabled",
-            ))
+            sendJson(output, 403, RemoteStartResponse(status = "error", description = "Accessibility service not enabled"))
             return
         }
-
-        val pending = PhoneRemoteHttpServer.createPendingConfirmation(clientIp, "Allow laptop to control this phone?")
+        val capture = ScreenCaptureService.getInstance()
+        if (capture == null || !capture.isCapturingValue) {
+            sendJson(output, 409, RemoteStartResponse(status = "needs_screen_share", description = "Start screen share on phone first"))
+            return
+        }
+        val pending = createPendingRequest(clientIp, "Allow laptop to control this phone?")
+        // Surface phone-side consent prompt via foreground notification tap target; UI observes pendingRequest.
+        PhoneRemoteForegroundService.start(context)
         sendJson(output, 200, RemoteStartResponse(
-            status = "needs_confirmation",
-            confirmToken = pending.token,
+            status = "pending",
+            requestId = pending.id,
             description = pending.description,
-            expiresIn = 30,
+            expiresIn = (REQUEST_TTL_MS / 1000).toInt(),
         ))
     }
 
+    private fun handleRequestStatus(output: java.io.OutputStream, requestId: String, clientIp: String, localIp: String) {
+        val req = getRequest(requestId)
+        if (req == null || req.clientIp != clientIp) {
+            sendJson(output, 404, RemoteRequestStatusResponse(status = "not_found", requestId = requestId))
+            return
+        }
+        when (req.status) {
+            RequestStatus.PENDING -> {
+                if (req.isExpired()) {
+                    req.status = RequestStatus.EXPIRED
+                    sendJson(output, 200, RemoteRequestStatusResponse(status = "expired", requestId = requestId))
+                } else {
+                    sendJson(output, 200, RemoteRequestStatusResponse(status = "pending", requestId = requestId, expiresIn = ((REQUEST_TTL_MS - (System.currentTimeMillis() - req.createdAt)) / 1000).toInt().coerceAtLeast(0)))
+                }
+            }
+            RequestStatus.DENIED -> sendJson(output, 200, RemoteRequestStatusResponse(status = "denied", requestId = requestId))
+            RequestStatus.EXPIRED -> sendJson(output, 200, RemoteRequestStatusResponse(status = "expired", requestId = requestId))
+            RequestStatus.CONSUMED -> sendJson(output, 200, RemoteRequestStatusResponse(status = "consumed", requestId = requestId))
+            RequestStatus.ALLOWED -> {
+                val token = req.sessionToken
+                val session = token?.let { sessions[it] }
+                if (token == null || session == null || session.isExpired()) {
+                    req.status = RequestStatus.EXPIRED
+                    sendJson(output, 200, RemoteRequestStatusResponse(status = "expired", requestId = requestId))
+                } else {
+                    consumeAllowedRequest(requestId)
+                    val metrics = context.resources.displayMetrics
+                    sendJson(output, 200, RemoteRequestStatusResponse(
+                        status = "started",
+                        requestId = requestId,
+                        sessionToken = token,
+                        wsUrl = "ws://$localIp:$PORT/phone/remote/ws?token=$token",
+                        expiresIn = (SESSION_TTL_MS / 1000).toInt(),
+                        screen = ScreenInfo(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi),
+                    ))
+                }
+            }
+        }
+    }
+
     private fun handleConfirm(output: java.io.OutputStream, body: String, clientIp: String, localIp: String) {
-        val request = try {
-            Json { ignoreUnknownKeys = true }.decodeFromString<RemoteConfirmRequest>(body)
-        } catch (e: Exception) {
-            sendJson(output, 400, RemoteStartResponse(status = "error", description = "Invalid request"))
+        // Back-compat: treat confirm_token as request_id for older clients.
+        val request = try { Json { ignoreUnknownKeys = true }.decodeFromString<RemoteConfirmRequest>(body) } catch (_: Exception) { null }
+        val id = request?.confirmToken
+        if (id.isNullOrBlank()) {
+            sendJson(output, 400, RemoteStartResponse(status = "error", description = "Missing confirm token"))
             return
         }
-
-        val confirmToken = request.confirmToken ?: return sendJson(output, 400, RemoteStartResponse(status = "error", description = "Missing confirm token"))
-        val confirmation = PhoneRemoteHttpServer.validateConfirmation(confirmToken, clientIp)
-        if (confirmation == null) {
-            sendJson(output, 401, RemoteStartResponse(status = "error", description = "Invalid or expired confirmation"))
-            return
-        }
-
-        // Consume the confirmation
-        PhoneRemoteHttpServer.consumeConfirmation(confirmToken)
-
-        // Create the actual session
-        val session = PhoneRemoteHttpServer.createSession(clientIp)
-
-        // Start screen capture
-        startScreenCapture()
-
-        // Start foreground service
-        PhoneRemoteForegroundService.start(context)
-
-        val metrics = context.resources.displayMetrics
-        sendJson(output, 200, RemoteStartResponse(
-            status = "started",
-            sessionToken = session.token,
-            wsUrl = "ws://$localIp:$PORT/phone/remote/ws?token=${session.token}",
-            expiresIn = (PhoneRemoteHttpServer.SESSION_TTL_MS / 1000).toInt(),
-            screen = ScreenInfo(
-                width = metrics.widthPixels,
-                height = metrics.heightPixels,
-                density = metrics.densityDpi,
-            ),
-        ))
+        handleRequestStatus(output, id, clientIp, localIp)
     }
 
     private fun handleStop(output: java.io.OutputStream, body: String, clientIp: String) {
         val request = try {
             Json { ignoreUnknownKeys = true }.decodeFromString<RemoteStopRequest>(body)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             sendJson(output, 400, RemoteStartResponse(status = "error", description = "Invalid request"))
             return
         }
-
-        val session = PhoneRemoteHttpServer.validateSession(request.sessionToken, clientIp)
+        val session = validateSession(request.sessionToken, clientIp)
         if (session == null) {
             sendJson(output, 401, RemoteStartResponse(status = "error", description = "Invalid or expired session"))
             return
         }
+        stopSession(request.sessionToken)
+        sendJson(output, 200, RemoteStartResponse(status = "done"))
+    }
 
+    private fun stopSession(token: String) {
+        val session = sessions.remove(token) ?: return
         session.webSocketJob?.cancel()
-        session.frameChannel?.close()
-        PhoneRemoteHttpServer.sessions.remove(request.sessionToken)
-
-        // Stop foreground service if no more sessions
-        if (PhoneRemoteHttpServer.getActiveSessionCount() == 0) {
-            stopScreenCapture()
+        if (getActiveSessionCount() == 0) {
             PhoneRemoteForegroundService.stop(context)
         }
+    }
 
-        sendJson(output, 200, RemoteStartResponse(status = "done"))
+    fun stopAllSessions() {
+        sessions.values.forEach { it.webSocketJob?.cancel() }
+        sessions.clear()
+        pendingRequests.clear()
+        _pendingRequest.value = null
     }
 
     private fun handleInput(output: java.io.OutputStream, body: String, clientIp: String) {
@@ -668,87 +789,112 @@ class PhoneRemoteHttpServer private constructor(
     }
 
     private fun handleWebSocket(socket: Socket, path: String, clientIp: String, headers: Map<String, String>) {
+        if (!isAuthorized(headers, path)) {
+            sendResponse(socket.getOutputStream(), 401, "Unauthorized", "text/plain")
+            return
+        }
         val uri = Uri.parse("http://localhost$path")
         val token = uri.getQueryParameter("token")
         if (token.isNullOrBlank()) {
             sendResponse(socket.getOutputStream(), 400, "Missing token", "text/plain")
             return
         }
-
-        val session = PhoneRemoteHttpServer.validateSession(token, clientIp)
+        val session = validateSession(token, clientIp)
         if (session == null) {
             sendResponse(socket.getOutputStream(), 401, "Invalid session", "text/plain")
             return
         }
+        if (!upgradeWebSocket(socket, headers["sec-websocket-key"] ?: "")) return
 
-        // Upgrade to WebSocket
-        if (!upgradeWebSocket(socket, headers["sec-websocket-key"] ?: "")) {
+        val capture = ScreenCaptureService.getInstance()
+        if (capture == null || !capture.isCapturingValue) {
+            sendWebSocketText(socket.getOutputStream(), """{"type":"error","message":"Screen share not active"}""")
+            try { socket.close() } catch (_: Exception) {}
             return
         }
 
-        // Start screen capture if not running
-        val capture = ScreenCaptureService.getInstance()
-        if (capture == null || !capture.isCapturingValue) {
-            // Try to start capture - in real implementation would need media projection permission
-        }
-
-        // Forward frames from ScreenCaptureService to WebSocket
         val wsJob = serverScope.launch {
             try {
-                val webSocketOut = socket.getOutputStream()
-                
-                // Use ScreenCaptureService frames if available
-                val captureService = ScreenCaptureService.getInstance()
-                if (captureService != null) {
-                    for (frame in captureService.frames) {
-                        if (!isRunning.get()) break
-                        sendWebSocketBinary(webSocketOut, frame)
-                    }
-                } else {
-                    // Fallback to session frame channel
-                    val frameChannel = Channel<ByteArray>(capacity = 10)
-                    session.frameChannel = frameChannel
-                    for (frame in frameChannel) {
-                        if (!isRunning.get()) break
-                        sendWebSocketBinary(webSocketOut, frame)
-                    }
+                val out = socket.getOutputStream()
+                val metrics = context.resources.displayMetrics
+                sendWebSocketText(out, """{"type":"screen_info","width":${metrics.widthPixels},"height":${metrics.heightPixels},"density":${metrics.densityDpi}}""")
+                capture.frames.collect { frame ->
+                    if (!isRunning.get()) return@collect
+                    sendWebSocketBinary(out, frame)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "WebSocket error", e)
             } finally {
                 session.webSocketJob = null
-                session.frameChannel = null
                 try { socket.close() } catch (_: Exception) {}
             }
         }
         session.webSocketJob = wsJob
 
-        // Read WebSocket frames (for ping/pong, close)
         serverScope.launch {
             try {
                 val wsIn = socket.getInputStream()
-                val buffer = ByteArray(1024)
                 while (isRunning.get() && !socket.isClosed) {
-                    val read = wsIn.read(buffer)
-                    if (read <= 0) break
-                    // Handle WebSocket frames (ping/pong)
-                    val opcode = (buffer[0].toInt() and 0x0F)
-                    if (opcode == 0x8) { // Close
-                        break
-                    } else if (opcode == 0x9) { // Ping
-                        sendWebSocketFrame(socket.getOutputStream(), 0xA, ByteArray(0)) // Pong
+                    val frame = readWebSocketFrame(wsIn) ?: break
+                    when (frame.opcode) {
+                        0x8 -> break
+                        0x9 -> sendWebSocketFrame(socket.getOutputStream(), 0xA, frame.payload)
+                        0x1 -> handleWsText(frame.payload.toString(StandardCharsets.UTF_8), session, clientIp)
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "WebSocket read error", e)
+            } catch (_: Exception) {
             } finally {
                 wsJob.cancel()
             }
         }
-
-        // Keep this handler thread alive while the stream runs: handleClient wraps
-        // the socket in `use`, which would close it as soon as this returns.
         runBlocking { wsJob.join() }
+    }
+
+    private data class WsFrame(val opcode: Int, val payload: ByteArray)
+
+    private fun readWebSocketFrame(input: java.io.InputStream): WsFrame? {
+        val b0 = input.read()
+        val b1 = input.read()
+        if (b0 == -1 || b1 == -1) return null
+        val opcode = b0 and 0x0F
+        var len = (b1 and 0x7F).toLong()
+        if (len == 126L) {
+            val hi = input.read(); val lo = input.read()
+            if (hi == -1 || lo == -1) return null
+            len = ((hi shl 8) or lo).toLong()
+        } else if (len == 127L) {
+            len = 0
+            repeat(8) {
+                val b = input.read()
+                if (b == -1) return null
+                len = (len shl 8) or b.toLong()
+            }
+        }
+        val masked = (b1 and 0x80) != 0
+        val mask = ByteArray(4)
+        if (masked) {
+            if (readExactBytes(input, 4)?.copyInto(mask) == null) return null
+        }
+        if (len > 1_000_000L) return null
+        val payload = readExactBytes(input, len.toInt()) ?: return null
+        if (masked) for (i in payload.indices) payload[i] = (payload[i].toInt() xor mask[i % 4].toInt()).toByte()
+        return WsFrame(opcode, payload)
+    }
+
+    private fun handleWsText(text: String, session: RemoteSession, clientIp: String) {
+        try {
+            val json = Json { ignoreUnknownKeys = true }
+            val obj = json.parseToJsonElement(text).jsonObject
+            val type = obj["type"]?.jsonPrimitive?.content
+            if (type == "input") {
+                val req = json.decodeFromString<InputRequest>(text)
+                if (req.sessionToken != session.token) return
+                validateSession(session.token, clientIp) ?: return
+                for (ev in req.events) accessibilityService.injectInput(ev)
+            } else if (type == "ping") {
+                // handled by WS frame ping/pong; text ping ignored
+            }
+        } catch (_: Exception) {}
     }
 
     private fun upgradeWebSocket(socket: Socket, key: String): Boolean {
@@ -775,7 +921,11 @@ class PhoneRemoteHttpServer private constructor(
     }
 
     private fun sendWebSocketBinary(output: java.io.OutputStream, data: ByteArray) {
-        sendWebSocketFrame(output, 0x2, data) // 0x2 = binary frame
+        sendWebSocketFrame(output, 0x2, data)
+    }
+
+    private fun sendWebSocketText(output: java.io.OutputStream, text: String) {
+        sendWebSocketFrame(output, 0x1, text.toByteArray(StandardCharsets.UTF_8))
     }
 
     private fun sendWebSocketFrame(output: java.io.OutputStream, opcode: Int, data: ByteArray) {
@@ -852,7 +1002,7 @@ class PhoneRemoteHttpServer private constructor(
     }
 
     private fun stopScreenCapture() {
-        ScreenCaptureService.stop()
+        // Do not kill capture globally here; Settings owns share lifecycle.
     }
 
     fun stop() {
