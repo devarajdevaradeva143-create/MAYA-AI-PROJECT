@@ -30,11 +30,38 @@ def set_phone_stats_provider(provider: Callable[[], list[dict[str, Any]]] | None
     _phone_stats_provider = provider
 
 
+def _freshness(device: dict[str, Any]) -> float:
+    """Sort key: how recently this record was updated (0 when unknown)."""
+    for field in ("updated", "last_seen", "paired_at"):
+        value = device.get(field)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+    return 0.0
+
+
+def dedupe_phone_devices(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One card per handset, newest record wins.
+
+    Every re-install/re-pair of the same phone creates a new device id, and the
+    token store keeps the old records active. Without this the monitoring page
+    showed the same phone several times.
+    """
+    newest: dict[str, dict[str, Any]] = {}
+    for device in devices:
+        if not isinstance(device, dict):
+            continue
+        key = str(device.get("name") or device.get("device_id") or "")
+        current = newest.get(key)
+        if current is None or _freshness(device) >= _freshness(current):
+            newest[key] = device
+    return list(newest.values())
+
+
 def get_phone_stats() -> list[dict[str, Any]]:
     """Fetch phone stats from the registered provider, if any."""
     if _phone_stats_provider is not None:
         try:
-            return _phone_stats_provider()
+            return dedupe_phone_devices(_phone_stats_provider())
         except Exception:  # noqa: BLE001 - best effort
             return []
     return []
