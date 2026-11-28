@@ -153,7 +153,7 @@ class MayaAccessibilityService : AccessibilityService() {
     fun injectInput(event: InputEventDto): Boolean {
         return when (event.type) {
             "click" -> injectClick(event.x, event.y)
-            "swipe" -> injectSwipe(event.x, event.y, event.button?.toFloat() ?: 0f, event.dy?.toFloat() ?: 0f)
+            "swipe" -> injectSwipe(event.x, event.y, event.x2, event.y2)
             "text" -> injectText(event.text ?: "")
             "key" -> injectKey(event.key ?: "")
             "scroll" -> injectScroll(0, event.dy ?: 0)

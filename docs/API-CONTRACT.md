@@ -744,7 +744,8 @@ Phone runs a minimal HTTP server on port **8421** (LAN only) when "Allow laptop 
   "session_token": "...",
   "events": [
     { "type": "move", "x": 0.5, "y": 0.3 },
-    { "type": "click", "button": "left" },
+    { "type": "click", "x": 0.5, "y": 0.3, "button": "left" },
+    { "type": "swipe", "x": 0.5, "y": 0.8, "x2": 0.5, "y2": 0.2 },
     { "type": "scroll", "dy": -3 },
     { "type": "text", "text": "hello" },
     { "type": "key", "key": "back" },
@@ -753,6 +754,12 @@ Phone runs a minimal HTTP server on port **8421** (LAN only) when "Allow laptop 
   ]
 }
 ```
+
+- `x`, `y` are **normalized 0.0–1.0**.
+- `click` / `swipe` carry their own coordinates; omit them to use the last moved position.
+- `swipe` = drag gesture: `x`,`y` is the start point, `x2`,`y2` the end point
+  (both normalized). End the stroke with `swipe` — do not also send a `click`
+  for the same gesture.
 
 **Response:** `{ "applied": 3 }`
 
@@ -798,9 +805,17 @@ GET /phone/remote/files/download?session_token=...&path=/Documents/file.txt
 **Upload:**
 ```
 POST /phone/remote/files/upload
-multipart: session_token, path=/Documents/, file=<bytes>
-→ { "size": 1234 }
+Content-Type: multipart/form-data; boundary=...
+  session_token=<session token>
+  path=/Documents/          (target directory, or full file path)
+  file=<bytes>               (filename taken from the part's filename=)
+→ { "status": "done", "path": "/Documents/report.pdf", "size": 1234 }
 ```
+
+- Max body 25 MB (`413` above that, `411` without `Content-Length`).
+- Target must resolve inside an allowed root → otherwise `403`.
+- `path` may be a directory (file is written into it) or an explicit file path.
+- Errors: `400` (bad multipart / unsafe filename), `401` (session), `403` (path), `500` (write failed).
 
 ### Session rules
 

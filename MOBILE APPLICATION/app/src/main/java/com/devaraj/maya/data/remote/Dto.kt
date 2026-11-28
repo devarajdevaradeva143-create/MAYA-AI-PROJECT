@@ -279,6 +279,9 @@ data class InputEventDto(
     val type: String,
     val x: Float? = null,
     val y: Float? = null,
+    // End point for swipe/drag gestures (normalized 0.0-1.0).
+    val x2: Float? = null,
+    val y2: Float? = null,
     val button: String? = null,
     val dy: Int? = null,
     val text: String? = null,

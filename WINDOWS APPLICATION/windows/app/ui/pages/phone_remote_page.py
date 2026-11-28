@@ -48,6 +48,10 @@ class PhoneRemotePage(QWidget):
         self._pending_download: str | None = None
         self._current_remote_path: str | None = None
         self._allowed_roots: list[str] = []
+        # Drag tracking: press position is kept so release can decide
+        # between a tap (click) and a drag (swipe).
+        self._press_pos: tuple[float, float] | None = None
+        self._drag_pos: tuple[float, float] | None = None
 
         self._build_ui()
         self._connect_signals()
@@ -385,24 +389,61 @@ class PhoneRemotePage(QWidget):
         self.status_changed.emit(f"Error: {error}", "error")
 
     # --- Screen Input Handlers ---
+    def _normalized_pos(self, event) -> tuple[float, float]:
+        """Map a widget-space mouse position to normalized screen coords (0.0-1.0)."""
+        pos = event.position()
+        return (
+            min(max(pos.x() / self._screen_label.width(), 0.0), 1.0),
+            min(max(pos.y() / self._screen_label.height(), 0.0), 1.0),
+        )
+
     def _on_screen_press(self, event) -> None:
         if not self._client or not self._client.is_active:
             return
-        pos = event.position()
-        x = pos.x() / self._screen_label.width()
-        y = pos.y() / self._screen_label.height()
-        self._client.send_input([{"type": "move", "x": x, "y": y}, {"type": "click", "button": "left"}])
+        self._press_pos = self._normalized_pos(event)
+        self._drag_pos = self._press_pos
 
     def _on_screen_move(self, event) -> None:
         if not self._client or not self._client.is_active:
             return
-        pos = event.position()
-        x = pos.x() / self._screen_label.width()
-        y = pos.y() / self._screen_label.height()
-        self._client.send_ws_input([{"type": "move", "x": x, "y": y}])
+        if self._press_pos is None:
+            return
+        # Button is held: remember the latest point, the swipe is sent on release.
+        self._drag_pos = self._normalized_pos(event)
 
     def _on_screen_release(self, event) -> None:
-        pass
+        if not self._client or not self._client.is_active:
+            self._press_pos = None
+            self._drag_pos = None
+            return
+
+        start = self._press_pos
+        end = self._normalized_pos(event) if event is not None else self._drag_pos
+        self._press_pos = None
+        self._drag_pos = None
+        if start is None or end is None:
+            return
+
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        if (dx * dx + dy * dy) ** 0.5 < 0.02:
+            # Tap: click at the release point.
+            self._client.send_input(
+                [{"type": "click", "x": end[0], "y": end[1], "button": "left"}]
+            )
+        else:
+            # Drag: swipe from press point to release point.
+            self._client.send_input(
+                [
+                    {
+                        "type": "swipe",
+                        "x": start[0],
+                        "y": start[1],
+                        "x2": end[0],
+                        "y2": end[1],
+                    }
+                ]
+            )
 
     def _on_screen_wheel(self, event) -> None:
         if not self._client or not self._client.is_active:

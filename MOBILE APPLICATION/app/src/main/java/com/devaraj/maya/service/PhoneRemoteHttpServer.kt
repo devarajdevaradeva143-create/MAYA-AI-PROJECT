@@ -65,6 +65,7 @@ class PhoneRemoteHttpServer private constructor(
         private const val TAG = "PhoneRemoteHttpServer"
         private const val PORT = 8421
         private const val SESSION_TTL_MS = 5 * 60 * 1000 // 5 minutes
+        private const val MAX_UPLOAD_BYTES = 25L * 1024 * 1024
         private const val TOKEN_PREFIX = "maya_"
         private const val TOKEN_RANDOM_CHARS = 43
 
@@ -259,20 +260,32 @@ class PhoneRemoteHttpServer private constructor(
             val path = parts[1]
             val headers = readHeaders(input)
             val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-            val body = if (contentLength > 0) readBody(input, contentLength) else ""
+            // Uploads carry binary multipart data: leave the stream untouched for the
+            // handler, which reads exactly content-length bytes.
+            val isUpload = method == "POST" && path == "/phone/remote/files/upload"
+            val body = if (!isUpload && contentLength > 0) readBody(input, contentLength) else ""
 
             val clientIp = s.inetAddress.hostAddress
 
-            when {
-                method == "POST" && path == "/phone/remote/start" -> handleStart(output, clientIp)
-                method == "POST" && path == "/phone/remote/confirm" -> handleConfirm(output, body, clientIp, s.localAddress.hostAddress)
-                method == "POST" && path == "/phone/remote/stop" -> handleStop(output, body, clientIp)
-                method == "POST" && path == "/phone/remote/input" -> handleInput(output, body, clientIp)
-                method == "POST" && path == "/phone/remote/files/list" -> handleFileList(output, body, clientIp)
-                method == "GET" && path.startsWith("/phone/remote/files/download") -> handleFileDownload(output, path, clientIp)
-                method == "POST" && path == "/phone/remote/files/upload" -> handleFileUpload(output, headers, input, clientIp)
-                path.startsWith("/phone/remote/ws") -> handleWebSocket(s, path, clientIp, headers)
-                else -> sendResponse(output, 404, "Not Found", "text/plain")
+            try {
+                when {
+                    method == "POST" && path == "/phone/remote/start" -> handleStart(output, clientIp)
+                    method == "POST" && path == "/phone/remote/confirm" -> handleConfirm(output, body, clientIp, s.localAddress.hostAddress)
+                    method == "POST" && path == "/phone/remote/stop" -> handleStop(output, body, clientIp)
+                    method == "POST" && path == "/phone/remote/input" -> handleInput(output, body, clientIp)
+                    method == "POST" && path == "/phone/remote/files/list" -> handleFileList(output, body, clientIp)
+                    method == "GET" && path.startsWith("/phone/remote/files/download") -> handleFileDownload(output, path, clientIp)
+                    method == "POST" && path == "/phone/remote/files/upload" -> handleFileUpload(output, headers, input, clientIp)
+                    path.startsWith("/phone/remote/ws") -> handleWebSocket(s, path, clientIp, headers)
+                    else -> sendResponse(output, 404, "Not Found", "text/plain")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Request failed: $method $path", e)
+                try {
+                    sendResponse(output, 500, "Internal error", "text/plain")
+                } catch (_: Exception) {
+                    // Socket already closed by the failing handler.
+                }
             }
         }
     }
@@ -523,24 +536,135 @@ class PhoneRemoteHttpServer private constructor(
         input: java.io.InputStream,
         clientIp: String,
     ) {
-        // Simplified multipart parsing - in production use a proper parser
         val contentType = headers["content-type"] ?: ""
         if (!contentType.startsWith("multipart/form-data")) {
             sendJson(output, 400, FileUploadDto(status = "error", path = "", size = 0))
             return
         }
 
-        // Extract session_token and path from form data (simplified)
-        // For now, read body and parse as JSON for simplicity
-        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-        if (contentLength > 25 * 1024 * 1024) {
+        val boundary = contentType.substringAfter("boundary=", "").trim().trim('"')
+        if (boundary.isBlank()) {
+            sendJson(output, 400, FileUploadDto(status = "error", path = "", size = 0))
+            return
+        }
+
+        val contentLength = headers["content-length"]?.toLongOrNull() ?: -1L
+        if (contentLength <= 0) {
+            sendJson(output, 411, FileUploadDto(status = "error", path = "", size = 0))
+            return
+        }
+        if (contentLength > MAX_UPLOAD_BYTES) {
             sendJson(output, 413, FileUploadDto(status = "error", path = "", size = 0))
             return
         }
 
-        // In a real implementation, parse multipart form data
-        // For now, respond with not implemented
-        sendJson(output, 501, FileUploadDto(status = "not_implemented", path = "", size = 0))
+        val body = readExactBytes(input, contentLength.toInt())
+        if (body == null) {
+            sendJson(output, 400, FileUploadDto(status = "error", path = "", size = 0))
+            return
+        }
+
+        var sessionToken: String? = null
+        var requestedPath: String? = null
+        var fileBytes: ByteArray? = null
+        var fileName: String? = null
+        for (part in parseMultipart(body, boundary)) {
+            when (part.name) {
+                "session_token" -> sessionToken = String(part.data, StandardCharsets.UTF_8).trim()
+                "path" -> requestedPath = String(part.data, StandardCharsets.UTF_8).trim()
+                "file" -> {
+                    fileBytes = part.data
+                    fileName = part.fileName
+                }
+            }
+        }
+
+        if (validateSession(sessionToken.orEmpty(), clientIp) == null) {
+            sendJson(output, 401, FileUploadDto(status = "error", path = "", size = 0))
+            return
+        }
+
+        val bytes = fileBytes
+        val safeName = (fileName ?: "").substringAfterLast('/').substringAfterLast('\\')
+        if (bytes == null || safeName.isBlank() || safeName.contains("..")) {
+            sendJson(output, 400, FileUploadDto(status = "error", path = "", size = 0))
+            return
+        }
+
+        val directory = File(requestedPath?.takeIf { it.isNotBlank() } ?: context.filesDir.absolutePath)
+        val target = if (directory.isDirectory || !directory.exists()) File(directory, safeName) else directory
+
+        if (!isPathAllowed(target.absolutePath)) {
+            sendJson(output, 403, FileUploadDto(status = "error", path = target.absolutePath, size = 0))
+            return
+        }
+
+        try {
+            target.parentFile?.takeIf { !it.exists() }?.mkdirs()
+            target.writeBytes(bytes)
+            sendJson(output, 200, FileUploadDto(status = "done", path = target.absolutePath, size = bytes.size))
+        } catch (e: Exception) {
+            Log.e(TAG, "Upload failed", e)
+            sendJson(output, 500, FileUploadDto(status = "error", path = target.absolutePath, size = 0))
+        }
+    }
+
+    private data class MultipartPart(val name: String?, val fileName: String?, val data: ByteArray)
+
+    /** Parses a multipart/form-data body into its named parts. */
+    private fun parseMultipart(body: ByteArray, boundary: String): List<MultipartPart> {
+        val delimiter = "--$boundary".toByteArray(StandardCharsets.ISO_8859_1)
+        val crlf = "\r\n".toByteArray(StandardCharsets.ISO_8859_1)
+        val parts = mutableListOf<MultipartPart>()
+        var index = indexOfBytes(body, delimiter, 0)
+        while (index >= 0) {
+            var start = index + delimiter.size
+            // A closing delimiter ("--boundary--") ends the body.
+            if (start + 1 < body.size && body[start] == '-'.code.toByte() && body[start + 1] == '-'.code.toByte()) break
+            if (start + 1 < body.size && body[start] == crlf[0] && body[start + 1] == crlf[1]) start += 2
+            val next = indexOfBytes(body, delimiter, start)
+            if (next < 0) break
+            var end = next
+            if (end - 2 >= start && body[end - 2] == crlf[0] && body[end - 1] == crlf[1]) end -= 2
+            parts += parsePart(body, start, end)
+            index = next
+        }
+        return parts
+    }
+
+    private fun parsePart(body: ByteArray, start: Int, end: Int): MultipartPart {
+        val headerSeparator = "\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1)
+        val headerEnd = indexOfBytes(body, headerSeparator, start)
+        if (headerEnd < 0 || headerEnd + headerSeparator.size > end) {
+            return MultipartPart(null, null, ByteArray(0))
+        }
+        val headerText = String(body, start, headerEnd - start, StandardCharsets.UTF_8)
+        val data = body.copyOfRange(headerEnd + headerSeparator.size, end)
+        val name = Regex("name=\"([^\"]*)\"").find(headerText)?.groupValues?.get(1)
+        val fileName = Regex("filename=\"([^\"]*)\"").find(headerText)?.groupValues?.get(1)
+        return MultipartPart(name, fileName, data)
+    }
+
+    private fun indexOfBytes(haystack: ByteArray, needle: ByteArray, from: Int): Int {
+        if (needle.isEmpty() || from < 0) return -1
+        outer@ for (i in from..haystack.size - needle.size) {
+            for (j in needle.indices) {
+                if (haystack[i + j] != needle[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+
+    private fun readExactBytes(input: java.io.InputStream, length: Int): ByteArray? {
+        val buffer = ByteArray(length)
+        var read = 0
+        while (read < length) {
+            val r = input.read(buffer, read, length - read)
+            if (r == -1) break
+            read += r
+        }
+        return if (read == length) buffer else null
     }
 
     private fun handleWebSocket(socket: Socket, path: String, clientIp: String, headers: Map<String, String>) {
