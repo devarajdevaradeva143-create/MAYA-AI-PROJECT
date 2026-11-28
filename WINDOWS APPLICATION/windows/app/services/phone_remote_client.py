@@ -18,6 +18,78 @@ from app.services.server_service import shared_server_service
 
 logger = logging.getLogger("maya.phone_remote")
 
+# Keep urllib3 from spamming retry chatter into the logs; the friendly
+# messages below are what callers actually want to see.
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+
+
+def _describe_remote_error(exc: Exception, host: str | None = None) -> str:
+    """Short, actionable text for phone-side network failures.
+
+    urllib3 renders a connection failure as a paragraph of retry chatter, which
+    is useless in the status label / logs. Collapse it into one sentence.
+    """
+    target = f"http://{host}:8421" if host else "the phone"
+
+    is_conn = False
+    is_timeout = False
+
+    # Type-based detection.
+    try:
+        import requests
+
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            is_conn = True
+        if isinstance(exc, requests.exceptions.Timeout):
+            is_timeout = True
+    except Exception:  # pragma: no cover - requests always present
+        pass
+    try:
+        import urllib3
+
+        if isinstance(exc, getattr(urllib3.exceptions, "MaxRetryError", ())):
+            is_conn = True
+        if isinstance(exc, getattr(urllib3.exceptions, "NewConnectionError", ())):
+            is_conn = True
+        if isinstance(exc, getattr(urllib3.exceptions, "ConnectTimeoutError", ())):
+            is_timeout = True
+        if isinstance(exc, getattr(urllib3.exceptions, "ReadTimeoutError", ())):
+            is_timeout = True
+    except Exception:  # pragma: no cover
+        pass
+
+    if isinstance(exc, (ConnectionRefusedError, ConnectionResetError, BrokenPipeError)):
+        is_conn = True
+    if isinstance(exc, TimeoutError):
+        is_timeout = True
+
+    # String-based fallback for wrapped / unknown exception types.
+    text = str(exc).lower()
+    if "timed out" in text or "timeout" in text:
+        is_timeout = is_timeout or not is_conn
+    if (
+        "refused" in text
+        or "retries exceeded" in text
+        or "newconnectionerror" in text
+        or "failed to establish" in text
+        or "name or service not known" in text
+        or "no route to host" in text
+    ):
+        is_conn = True
+
+    if is_conn:
+        return (
+            f"No answer from {target} - open the Maya app on the phone and enable "
+            "Accessibility + Phone Remote."
+        )
+    if is_timeout:
+        return f"Phone timed out at {target} - check both devices are on the same Wi-Fi."
+    return str(exc)
+
+
+# Back-compat alias used by some callers / tests.
+describe_remote_error = _describe_remote_error
 
 @dataclass
 class PhoneRemoteSession:
@@ -46,6 +118,7 @@ class PhoneRemoteClient:
         self._ws_thread: threading.Thread | None = None
         self._stop_ws = threading.Event()
         self._phone_base_url: str | None = None
+        self._phone_host: str | None = None
 
     @property
     def is_active(self) -> bool:
@@ -75,6 +148,25 @@ class PhoneRemoteClient:
                 return ip
         return None
 
+    def _get_auth_headers(self) -> dict[str, str]:
+        # Best-effort: use server-side paired device token is not exposed to Windows UI.
+        # The phone server accepts Bearer token of any paired device; Windows client can
+        # provide it via env/config later. For now, try to reuse server app state token if present.
+        try:
+            service = shared_server_service()
+            if service.running:
+                tokens = service.app.state.tokens.list_active()
+                if tokens:
+                    # TokenRegistry stores token hashes, not raw tokens. Cannot send raw token.
+                    pass
+        except Exception:
+            pass
+        token = getattr(self, "_auth_token", None) or ""
+        return {"Authorization": f"Bearer {token}"} if token else {}
+
+    def set_auth_token(self, token: str | None) -> None:
+        self._auth_token = (token or "").strip() or None
+
     def start_session(
         self,
         phone_host: str,
@@ -82,57 +174,58 @@ class PhoneRemoteClient:
         quality: int = 60,
         fps: int = 10,
     ) -> dict:
-        """Start a remote session on the phone. Returns confirm_token for user approval."""
+        """Start a remote session on the phone. Returns pending request id."""
         url = f"{self._get_phone_url(phone_host)}/phone/remote/start"
         payload = {"max_width": max_width, "quality": quality, "fps": fps}
-
         try:
-            resp = requests.post(url, json=payload, timeout=10)
-            data = resp.json()
-            if resp.status_code == 200 and data.get("confirm_token"):
-                return {"status": "needs_confirmation", "confirm_token": data["confirm_token"]}
-            elif resp.status_code == 200 and data.get("session_token"):
-                self._session = PhoneRemoteSession(
-                    session_token=data["session_token"],
-                    ws_url=data["ws_url"],
-                    expires_at=time.time() + data["expires_in"],
-                    screen_width=data["screen"]["width"],
-                    screen_height=data["screen"]["height"],
-                    density=data["screen"]["density"],
-                )
-                self._phone_base_url = self._get_phone_url(phone_host)
-                self._start_ws()
-                return {"status": "started", **data}
-            else:
-                raise RuntimeError(data.get("detail", f"HTTP {resp.status_code}"))
-        except Exception as e:
-            logger.error("Failed to start phone remote session: %s", e)
-            raise
+            resp = requests.post(url, json=payload, headers=self._get_auth_headers(), timeout=10)
+        except Exception as e:  # noqa: BLE001 - convert to a clean error
+            raise RuntimeError(_describe_remote_error(e, phone_host)) from e
+        data = resp.json() if resp.content else {}
+        if resp.status_code == 200 and data.get("status") == "pending":
+            return {"status": "pending", "request_id": data.get("request_id"), "expires_in": data.get("expires_in", 60)}
+        if resp.status_code == 200 and data.get("status") == "needs_confirmation":
+            # Back-compat with old phone server
+            return {"status": "pending", "request_id": data.get("confirm_token"), "expires_in": data.get("expires_in", 30), "legacy": True}
+        if resp.status_code == 200 and data.get("session_token"):
+            self._set_session(phone_host, data)
+            return {"status": "started", **data}
+        raise RuntimeError(data.get("description") or data.get("detail") or f"HTTP {resp.status_code}")
+
+    def get_request_status(self, phone_host: str, request_id: str) -> dict:
+        url = f"{self._get_phone_url(phone_host)}/phone/remote/request/{request_id}"
+        try:
+            resp = requests.get(url, headers=self._get_auth_headers(), timeout=10)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(_describe_remote_error(e, phone_host)) from e
+        data = resp.json() if resp.content else {}
+        if resp.status_code >= 400:
+            raise RuntimeError(data.get("description") or f"HTTP {resp.status_code}")
+        if data.get("status") == "started" and data.get("session_token"):
+            self._set_session(phone_host, data)
+        return data
+
+    def _set_session(self, phone_host: str, data: dict) -> None:
+        self._session = PhoneRemoteSession(
+            session_token=data["session_token"],
+            ws_url=data["ws_url"],
+            expires_at=time.time() + int(data.get("expires_in", 300)),
+            screen_width=data.get("screen", {}).get("width", 1080),
+            screen_height=data.get("screen", {}).get("height", 1920),
+            density=data.get("screen", {}).get("density", 420),
+        )
+        self._phone_base_url = self._get_phone_url(phone_host)
+        self._phone_host = phone_host
+        self._start_ws()
 
     def confirm_session(self, phone_host: str, confirm_token: str) -> dict:
-        """Confirm the session on phone (user tapped Allow)."""
-        url = f"{self._get_phone_url(phone_host)}/phone/remote/confirm"
-        payload = {"confirm_token": confirm_token}
-
-        try:
-            resp = requests.post(url, json=payload, timeout=10)
-            data = resp.json()
-            if resp.status_code == 200 and data.get("session_token"):
-                self._session = PhoneRemoteSession(
-                    session_token=data["session_token"],
-                    ws_url=data["ws_url"],
-                    expires_at=time.time() + data["expires_in"],
-                    screen_width=data["screen"]["width"],
-                    screen_height=data["screen"]["height"],
-                    density=data["screen"]["density"],
-                )
-                self._phone_base_url = self._get_phone_url(phone_host)
-                self._start_ws()
-                return {"status": "started", **data}
-            raise RuntimeError(data.get("detail", f"HTTP {resp.status_code}"))
-        except Exception as e:
-            logger.error("Failed to confirm phone remote session: %s", e)
-            raise
+        """Back-compat: older flow polled confirm endpoint."""
+        data = self.get_request_status(phone_host, confirm_token)
+        if data.get("status") == "started":
+            return data
+        if data.get("status") in {"pending"}:
+            return data
+        raise RuntimeError(data.get("description") or data.get("status") or "Confirmation failed")
 
     def stop_session(self) -> None:
         """Stop the remote session."""
@@ -144,6 +237,7 @@ class PhoneRemoteClient:
             requests.post(
                 url,
                 json={"session_token": self._session.session_token},
+                headers=self._get_auth_headers(),
                 timeout=5,
             )
         except Exception as e:
@@ -164,12 +258,13 @@ class PhoneRemoteClient:
         payload = {"session_token": self._session.session_token, "events": events}
 
         try:
-            resp = requests.post(url, json=payload, timeout=5)
-            data = resp.json()
-            return data.get("applied", 0)
-        except Exception as e:
-            logger.error("Failed to send input: %s", e)
-            raise
+            resp = requests.post(url, json=payload, headers=self._get_auth_headers(), timeout=5)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(_describe_remote_error(e, self._phone_host)) from e
+        data = resp.json() if resp.content else {}
+        if resp.status_code >= 400:
+            raise RuntimeError(data.get("description") or f"HTTP {resp.status_code}")
+        return data.get("applied", 0)
 
     def list_files(self, path: str) -> dict:
         """List files in phone's allowed root."""
@@ -180,11 +275,13 @@ class PhoneRemoteClient:
         payload = {"session_token": self._session.session_token, "path": path}
 
         try:
-            resp = requests.post(url, json=payload, timeout=10)
-            return resp.json()
-        except Exception as e:
-            logger.error("Failed to list files: %s", e)
-            raise
+            resp = requests.post(url, json=payload, headers=self._get_auth_headers(), timeout=10)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(_describe_remote_error(e, self._phone_host)) from e
+        data = resp.json() if resp.content else {}
+        if resp.status_code >= 400:
+            raise RuntimeError(data.get("description") or f"HTTP {resp.status_code}")
+        return data
 
     def download_file(self, path: str, dest_path: str) -> None:
         """Download a file from phone."""
@@ -195,14 +292,13 @@ class PhoneRemoteClient:
         params = {"session_token": self._session.session_token, "path": path}
 
         try:
-            resp = requests.get(url, params=params, stream=True, timeout=30)
-            resp.raise_for_status()
-            with open(dest_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        except Exception as e:
-            logger.error("Failed to download file: %s", e)
-            raise
+            resp = requests.get(url, params=params, headers=self._get_auth_headers(), stream=True, timeout=30)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(_describe_remote_error(e, self._phone_host)) from e
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
 
     def upload_file(self, local_path: str, remote_path: str) -> dict:
         """Upload a file to phone (placeholder - phone returns 501)."""
@@ -214,11 +310,13 @@ class PhoneRemoteClient:
             files = {"file": (local_path, f, "application/octet-stream")}
             data = {"session_token": self._session.session_token, "path": remote_path}
             try:
-                resp = requests.post(url, files=files, data=data, timeout=30)
-                return resp.json()
-            except Exception as e:
-                logger.error("Failed to upload file: %s", e)
-                raise
+                resp = requests.post(url, files=files, data=data, headers=self._get_auth_headers(), timeout=30)
+            except Exception as e:  # noqa: BLE001
+                raise RuntimeError(_describe_remote_error(e, self._phone_host)) from e
+            out = resp.json() if resp.content else {}
+            if resp.status_code >= 400:
+                raise RuntimeError(out.get("description") or f"HTTP {resp.status_code}")
+            return out
 
     def _start_ws(self) -> None:
         """Start WebSocket connection for screen stream."""
@@ -247,8 +345,9 @@ class PhoneRemoteClient:
         if not ws_url:
             return
 
+        headers = self._get_auth_headers()
         try:
-            async with websockets.connect(ws_url) as ws:
+            async with websockets.connect(ws_url, additional_headers=headers) as ws:
                 self._ws = ws
                 logger.info("Phone remote WS connected: %s", ws_url)
 

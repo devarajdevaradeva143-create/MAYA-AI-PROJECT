@@ -6,16 +6,19 @@ import logging
 import threading
 from pathlib import Path
 
+import requests
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -29,10 +32,71 @@ from app.settings_repository import SettingsRepository
 logger = logging.getLogger("maya.ui.phone_remote")
 
 
+def _describe_remote_error(exc: Exception, host: str | None) -> str:
+    """Short, actionable text for phone-side network failures.
+
+    urllib3 renders a connection failure as a paragraph of retry chatter, which
+    is useless in the status label.
+    """
+    target = f"http://{host}:8421" if host else "the phone"
+
+    is_conn = False
+    is_timeout = False
+
+    try:
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            is_conn = True
+        if isinstance(exc, requests.exceptions.Timeout):
+            is_timeout = True
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        import urllib3
+
+        if isinstance(exc, getattr(urllib3.exceptions, "MaxRetryError", ())):
+            is_conn = True
+        if isinstance(exc, getattr(urllib3.exceptions, "NewConnectionError", ())):
+            is_conn = True
+        if isinstance(exc, getattr(urllib3.exceptions, "ConnectTimeoutError", ())):
+            is_timeout = True
+        if isinstance(exc, getattr(urllib3.exceptions, "ReadTimeoutError", ())):
+            is_timeout = True
+    except Exception:  # pragma: no cover
+        pass
+
+    if isinstance(exc, (ConnectionRefusedError, ConnectionResetError, BrokenPipeError)):
+        is_conn = True
+    if isinstance(exc, TimeoutError):
+        is_timeout = True
+
+    text = str(exc).lower()
+    if "timed out" in text or "timeout" in text:
+        is_timeout = is_timeout or not is_conn
+    if (
+        "refused" in text
+        or "retries exceeded" in text
+        or "newconnectionerror" in text
+        or "failed to establish" in text
+        or "name or service not known" in text
+        or "no route to host" in text
+    ):
+        is_conn = True
+
+    if is_conn:
+        return (
+            f"No answer from {target} - open the Maya app on the phone and enable "
+            "Accessibility + Phone Remote."
+        )
+    if is_timeout:
+        return f"Phone timed out at {target} - check both devices are on the same Wi-Fi."
+    return str(exc)
+
+
 class PhoneRemotePage(QWidget):
     """Phone Remote page: live phone screen + input controls + file browser."""
 
     status_changed = Signal(str, str)  # text, state
+    server_started = Signal()  # background start finished, queued to the GUI thread
 
     def __init__(
         self,
@@ -73,9 +137,18 @@ class PhoneRemotePage(QWidget):
 
         self._session_status = QLabel("No session")
         self._session_status.setObjectName("cardTitle")
-        session_layout.addWidget(self._session_status)
+        # A long device/IP hint must not widen the whole page.
+        self._session_status.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        session_layout.addWidget(self._session_status, 1)
 
-        session_layout.addStretch(1)
+        self._start_server_btn = QPushButton("Start Server")
+        self._start_server_btn.setObjectName("secondaryButton")
+        self._start_server_btn.setFixedHeight(36)
+        self._start_server_btn.setVisible(False)
+        self._start_server_btn.clicked.connect(self._on_start_server)
+        session_layout.addWidget(self._start_server_btn)
 
         self._start_btn = QPushButton("Start Session")
         self._start_btn.setObjectName("primaryButton")
@@ -127,11 +200,16 @@ class PhoneRemotePage(QWidget):
         layout.addWidget(self._confirm_frame)
 
         # --- Main Content (Screen + Controls) ---
-        content = QHBoxLayout()
-        content.setSpacing(16)
+        # A splitter keeps both panels usable: the page can be narrower than
+        # the sum of the two columns, and the phone-files panel is never cut
+        # off at the right edge.
+        content = QSplitter(Qt.Orientation.Horizontal)
+        content.setChildrenCollapsible(False)
+        content.setHandleWidth(12)
 
         # Left: Screen view
         screen_section = QVBoxLayout()
+        screen_section.setContentsMargins(0, 0, 0, 0)
         screen_section.setSpacing(8)
 
         screen_label = QLabel("Phone Screen")
@@ -141,12 +219,12 @@ class PhoneRemotePage(QWidget):
         self._screen_scroll = QScrollArea()
         self._screen_scroll.setWidgetResizable(True)
         self._screen_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._screen_scroll.setMinimumHeight(400)
+        self._screen_scroll.setMinimumHeight(320)
 
         self._screen_label = QLabel("No active session")
         self._screen_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._screen_label.setObjectName("screenPlaceholder")
-        self._screen_label.setMinimumSize(320, 560)
+        self._screen_label.setMinimumSize(240, 420)
         self._screen_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._screen_scroll.setWidget(self._screen_label)
 
@@ -159,20 +237,25 @@ class PhoneRemotePage(QWidget):
 
         screen_section.addWidget(self._screen_scroll, 1)
 
-        # On-screen keyboard / key buttons
-        keys_row = QHBoxLayout()
-        keys_row.setSpacing(8)
-        for key_text, key_name in [
+        # On-screen keyboard / key buttons (2 rows so the row can shrink)
+        keys_grid = QGridLayout()
+        keys_grid.setContentsMargins(0, 0, 0, 0)
+        keys_grid.setHorizontalSpacing(8)
+        keys_grid.setVerticalSpacing(8)
+        key_defs = [
             ("Back", "back"), ("Home", "home"), ("Recents", "recents"),
             ("Enter", "enter"), ("Esc", "escape"), ("Tab", "tab"),
             ("↑", "up"), ("↓", "down"), ("←", "left"), ("→", "right"),
             ("Space", "space"), ("Del", "delete"),
-        ]:
+        ]
+        for index, (key_text, key_name) in enumerate(key_defs):
             btn = QPushButton(key_text)
             btn.setFixedHeight(36)
             btn.clicked.connect(lambda _checked=False, k=key_name: self._send_key(k))
-            keys_row.addWidget(btn)
-        screen_section.addLayout(keys_row)
+            keys_grid.addWidget(btn, index // 6, index % 6)
+        for column in range(6):
+            keys_grid.setColumnStretch(column, 1)
+        screen_section.addLayout(keys_grid)
 
         # Type text input
         type_row = QHBoxLayout()
@@ -183,15 +266,29 @@ class PhoneRemotePage(QWidget):
         type_row.addWidget(self._type_input)
         screen_section.addLayout(type_row)
 
-        content.addLayout(screen_section, 2)
+        screen_container = QWidget()
+        screen_container.setLayout(screen_section)
+        screen_container.setMinimumWidth(300)
+        content.addWidget(screen_container)
 
         # Right: File Browser
         file_section = QVBoxLayout()
+        file_section.setContentsMargins(0, 0, 0, 0)
         file_section.setSpacing(8)
 
         file_label = QLabel("Phone Files")
         file_label.setObjectName("sectionTitle")
         file_section.addWidget(file_label)
+
+        self._file_path_label = QLabel("/")
+        self._file_path_label.setObjectName("cardSubtitle")
+        # On its own row it gets the panel width; deep phone paths must not
+        # widen the panel, so the text may clip and the tooltip keeps it whole.
+        self._file_path_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        self._file_path_label.setToolTip("/")
+        file_section.addWidget(self._file_path_label)
 
         file_toolbar = QHBoxLayout()
         file_toolbar.setSpacing(8)
@@ -214,9 +311,6 @@ class PhoneRemotePage(QWidget):
         file_toolbar.addWidget(self._file_upload_btn)
 
         file_toolbar.addStretch(1)
-        self._file_path_label = QLabel("/")
-        self._file_path_label.setObjectName("cardSubtitle")
-        file_toolbar.addWidget(self._file_path_label)
         file_section.addLayout(file_toolbar)
 
         self._file_tree = QTreeWidget()
@@ -228,38 +322,85 @@ class PhoneRemotePage(QWidget):
         self._file_tree.customContextMenuRequested.connect(self._on_file_context_menu)
         file_section.addWidget(self._file_tree, 1)
 
-        content.addLayout(file_section, 1)
+        files_container = QWidget()
+        files_container.setLayout(file_section)
+        content.addWidget(files_container)
 
-        layout.addLayout(content, 1)
+        content.setStretchFactor(0, 3)
+        content.setStretchFactor(1, 2)
+        content.setSizes([640, 360])
+
+        layout.addWidget(content, 1)
 
     def _connect_signals(self) -> None:
-        pass
+        self.server_started.connect(self._check_phone_connection)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt signature
+        # The phone server may have been started (or stopped) while this page
+        # was hidden, so refresh the session banner every time it is shown.
+        super().showEvent(event)
+        self._check_phone_connection()
+
+    def _set_status_text(self, text: str) -> None:
+        self._session_status.setText(text)
+        self._session_status.setToolTip(text)
 
     def _check_phone_connection(self) -> None:
         """Check if a phone is paired and get its IP."""
         service = shared_server_service()
         if not service.running:
-            self._session_status.setText("Phone server not running")
+            self._set_status_text("Phone server not running")
+            self._start_server_btn.setEnabled(True)
+            self._start_server_btn.setVisible(True)
             self._start_btn.setEnabled(False)
             return
 
+        self._start_server_btn.setVisible(False)
         tokens = service.app.state.tokens
         devices = tokens.list_active()
         if not devices:
-            self._session_status.setText("No phone paired")
+            self._set_status_text("No phone paired")
             self._start_btn.setEnabled(False)
             return
 
-        # Use the most recently seen device
-        device = max(devices, key=lambda d: d.last_seen)
-        self._phone_host = device.host if hasattr(device, 'host') else "127.0.0.1"
-        self._session_status.setText(f"Ready: {device.name} ({self._phone_host})")
+        device = max(devices, key=lambda d: getattr(d, "last_seen", 0) or 0)
+        host = (getattr(device, "last_ip", "") or "").strip()
+        self._phone_host = host or None
+        if not host:
+            self._set_status_text(
+                f"{device.name}: phone IP unknown. Connect phone to laptop once."
+            )
+            self._start_btn.setEnabled(False)
+            return
+        self._set_status_text(f"Ready: {device.name} ({host})")
         self._start_btn.setEnabled(True)
+
+    def _on_start_server(self) -> None:
+        """Start the shared phone server, then refresh the session banner."""
+        self._start_server_btn.setEnabled(False)
+        self._set_status_text("Starting phone server…")
+        self.status_changed.emit("Starting phone server…", "warn")
+
+        def _worker():
+            try:
+                shared_server_service().start()
+            except Exception as exc:  # noqa: BLE001 - report, never crash the UI
+                # Widget state is refreshed on the GUI thread by server_started.
+                logger.error("Phone server start failed: %s", exc)
+                self.status_changed.emit(f"Phone server failed: {exc}", "error")
+                self.server_started.emit()
+                return
+            self.status_changed.emit("Phone server running", "ok")
+            self.server_started.emit()
+
+        threading.Thread(target=_worker, name="maya-server-start", daemon=True).start()
 
     def _on_start_session(self) -> None:
         """Start a remote session on the phone."""
         if not self._phone_host:
-            return
+            self._check_phone_connection()
+            if not self._phone_host:
+                return
 
         self._start_btn.setEnabled(False)
         self.status_changed.emit("Starting session…", "warn")
@@ -271,61 +412,58 @@ class PhoneRemotePage(QWidget):
                     on_error=self._on_client_error,
                 )
                 result = self._client.start_session(self._phone_host)
-                if result.get("status") == "needs_confirmation":
-                    self._confirm_token = result["confirm_token"]
-                    self._show_confirm_dialog()
+                if result.get("status") == "pending":
+                    self._confirm_token = result.get("request_id")
+                    self._show_confirm_dialog(int(result.get("expires_in", 60)))
                 elif result.get("status") == "started":
                     self._on_session_started()
                 else:
-                    raise RuntimeError(result.get("detail", "Unknown response"))
-            except Exception as e:
-                logger.error("Start session failed: %s", e)
-                self.status_changed.emit(f"Failed: {e}", "error")
+                    raise RuntimeError(result.get("description") or result.get("detail") or "Unknown response")
+            except Exception as e:  # noqa: BLE001 - report, never crash the UI
+                friendly = _describe_remote_error(e, self._phone_host)
+                logger.error("Start session failed: %s", friendly)
+                self.status_changed.emit(friendly, "error")
                 self._start_btn.setEnabled(True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _show_confirm_dialog(self) -> None:
+    def _show_confirm_dialog(self, expires_in: int = 60) -> None:
         """Show the confirmation dialog with countdown."""
         self._confirm_frame.setVisible(True)
-        self._confirm_label.setText("Phone is asking for permission to allow remote control.\nTap 'Allow' on your phone.")
-        self._confirm_timer_label.setText("Expires in 60s")
-
-        self._confirm_timer = QTimer()
+        self._confirm_label.setText("Waiting for phone approval...\nPhone-la 'Allow remote control' accept pannunga.")
+        self._confirm_remaining = max(1, int(expires_in))
+        self._confirm_timer_label.setText(f"Expires in {self._confirm_remaining}s")
+        self._allow_btn.setEnabled(False)
+        self._deny_btn.setEnabled(True)
+        if self._confirm_timer:
+            self._confirm_timer.stop()
+        self._confirm_timer = QTimer(self)
         self._confirm_timer.timeout.connect(self._update_confirm_timer)
         self._confirm_timer.start(1000)
-        self._confirm_remaining = 60
 
     def _update_confirm_timer(self) -> None:
         self._confirm_remaining -= 1
         if self._confirm_remaining <= 0:
             self._on_deny_session()
-        else:
-            self._confirm_timer_label.setText(f"Expires in {self._confirm_remaining}s")
+            return
+        self._confirm_timer_label.setText(f"Expires in {self._confirm_remaining}s")
+        # Poll phone for approval
+        if self._confirm_token and self._phone_host and self._client:
+            try:
+                status = self._client.get_request_status(self._phone_host, self._confirm_token)
+                st = status.get("status")
+                if st == "started":
+                    self._on_session_started()
+                elif st in {"denied", "expired", "not_found", "consumed"}:
+                    self.status_changed.emit(f"Session {st}", "warn")
+                    self._hide_confirm_dialog()
+                    self._start_btn.setEnabled(True)
+            except Exception as e:
+                logger.debug("poll request status failed: %s", e)
 
     def _on_allow_session(self) -> None:
-        """User clicked Allow on laptop (phone user must also allow)."""
-        if not self._confirm_token or not self._phone_host:
-            return
-
-        self._allow_btn.setEnabled(False)
-        self._deny_btn.setEnabled(False)
-
-        def _worker():
-            try:
-                self._client = self._client or get_phone_remote_client(
-                    on_frame=self._on_frame_received,
-                    on_error=self._on_client_error,
-                )
-                self._client.confirm_session(self._phone_host, self._confirm_token)
-                self._on_session_started()
-            except Exception as e:
-                logger.error("Confirm session failed: %s", e)
-                self.status_changed.emit(f"Failed: {e}", "error")
-                self._hide_confirm_dialog()
-                self._start_btn.setEnabled(True)
-
-        threading.Thread(target=_worker, daemon=True).start()
+        # Approval must happen on the phone; laptop only polls.
+        self.status_changed.emit("Phone-la Allow tap pannunga", "warn")
 
     def _on_deny_session(self) -> None:
         """User denied or timer expired."""
@@ -339,6 +477,8 @@ class PhoneRemotePage(QWidget):
             self._confirm_timer = None
         self._confirm_frame.setVisible(False)
         self._confirm_token = None
+        self._allow_btn.setEnabled(True)
+        self._deny_btn.setEnabled(True)
 
     def _on_session_started(self) -> None:
         """Session is active, update UI."""
@@ -385,8 +525,12 @@ class PhoneRemotePage(QWidget):
 
     def _on_client_error(self, error: str) -> None:
         """Client reported an error."""
-        logger.error("Phone remote client error: %s", error)
-        self.status_changed.emit(f"Error: {error}", "error")
+        text = error or ""
+        lower = text.lower()
+        if "retries exceeded" in lower or "newconnectionerror" in lower or "refused" in lower:
+            text = "No answer from the phone - open the Maya app on the phone and enable Accessibility + Phone Remote."
+        logger.error("Phone remote client error: %s", text)
+        self.status_changed.emit(f"Error: {text}", "error")
 
     # --- Screen Input Handlers ---
     def _normalized_pos(self, event) -> tuple[float, float]:
@@ -469,6 +613,7 @@ class PhoneRemotePage(QWidget):
 
         self._current_remote_path = path
         self._file_path_label.setText(path)
+        self._file_path_label.setToolTip(path)
         self._file_tree.clear()
 
         def _worker():
@@ -477,8 +622,9 @@ class PhoneRemotePage(QWidget):
                 entries = result.get("entries", [])
                 self._populate_file_tree(entries)
             except Exception as e:
-                logger.error("Failed to load files: %s", e)
-                self.status_changed.emit(f"File error: {e}", "error")
+                friendly = _describe_remote_error(e, self._phone_host)
+                logger.error("Failed to load files: %s", friendly)
+                self.status_changed.emit(f"File error: {friendly}", "error")
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -529,8 +675,9 @@ class PhoneRemotePage(QWidget):
                 self.status_changed.emit(f"Uploaded: {result.get('size', 0)} bytes", "ok")
                 self._load_file_tree(self._current_remote_path)
             except Exception as e:
-                logger.error("Upload failed: %s", e)
-                self.status_changed.emit(f"Upload failed: {e}", "error")
+                friendly = _describe_remote_error(e, self._phone_host)
+                logger.error("Upload failed: %s", friendly)
+                self.status_changed.emit(f"Upload failed: {friendly}", "error")
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -545,8 +692,9 @@ class PhoneRemotePage(QWidget):
                 self._client.download_file(remote_path, local_path)
                 self.status_changed.emit(f"Downloaded: {local_path}", "ok")
             except Exception as e:
-                logger.error("Download failed: %s", e)
-                self.status_changed.emit(f"Download failed: {e}", "error")
+                friendly = _describe_remote_error(e, self._phone_host)
+                logger.error("Download failed: %s", friendly)
+                self.status_changed.emit(f"Download failed: {friendly}", "error")
 
         threading.Thread(target=_worker, daemon=True).start()
 
